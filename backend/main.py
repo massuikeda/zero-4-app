@@ -1,8 +1,15 @@
 """zero-4-app バックエンド（FastAPI）
 
-ローカル起動（backend フォルダで）:
+ローカル起動（backend フォルダで・PowerShell）:
+    $env:SEED_DEMO="1"        # 初回だけ。DB を作るときにお試し用データを入れる
     uvicorn main:app --reload
     → http://localhost:8000/docs で API を試せる
+    ※ お試し用データを入れ直したいときは backend\data\app.db を消してから起動する
+
+Azure App Service で必要な環境変数:
+    JWT_SECRET    長いランダム文字列（未設定だと起動しない）
+    CORS_ORIGINS  フロントの URL
+    DB_PATH       /home/data/app.db
 
 Azure App Service の起動コマンド:
     gunicorn -w 1 -k uvicorn.workers.UvicornWorker main:app

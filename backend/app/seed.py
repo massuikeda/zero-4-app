@@ -1,4 +1,7 @@
-"""お試し用データ（DB を新しく作ったときだけ入る）
+"""お試し用データ（ローカル確認用）
+
+DB を新しく作るときに、環境変数 SEED_DEMO=1 が付いていた場合だけ入る。
+本番（Azure）では SEED_DEMO を設定しないこと。
 
 ログイン（パスワードはすべて password123）
   企業: a@example.com / b@example.com / c@example.com
