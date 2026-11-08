@@ -1,9 +1,0 @@
-fastapi>=0.115
-uvicorn[standard]>=0.30
-gunicorn>=22.0
-pyjwt>=2.8
-email-validator>=2.1
-
-# matching (TF-IDF)
-scikit-learn>=1.5
-janome>=0.5

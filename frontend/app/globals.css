@@ -1,41 +1,26 @@
 @import "tailwindcss";
 
-/* 企業アプリ＝紺、人材アプリ＝緑。どちらのアプリにいるか色で分かるようにする */
 :root {
-  --background: #f6f5f1;
-  --surface: #ffffff;
-  --foreground: #1c1f24;
-  --muted: #646b75;
-  --line: #e2e0d9;
-  --accent: #1f3a6b;
-  --accent-soft: #e7ecf5;
-}
-
-.theme-company {
-  --accent: #1f3a6b;
-  --accent-soft: #e7ecf5;
-}
-
-.theme-talent {
-  --accent: #0d6b5c;
-  --accent-soft: #e2f1ee;
+  --background: #ffffff;
+  --foreground: #171717;
 }
 
 @theme inline {
   --color-background: var(--background);
-  --color-surface: var(--surface);
   --color-foreground: var(--foreground);
-  --color-muted: var(--muted);
-  --color-line: var(--line);
-  --color-accent: var(--accent);
-  --color-accent-soft: var(--accent-soft);
-  --font-sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", "Noto Sans JP",
-    "Noto Sans CJK JP", system-ui, sans-serif;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans);
-  line-height: 1.7;
+  font-family: Arial, Helvetica, sans-serif;
 }
