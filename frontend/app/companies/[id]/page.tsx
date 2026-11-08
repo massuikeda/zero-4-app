@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useMe } from "@/components/AppShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { api } from "@/lib/api";
 import { RESOURCE_KINDS, type Business, type Company, type Resource, type ResourceKind, type UserRow } from "@/lib/types";
 
@@ -49,9 +50,7 @@ export default function CompanyPage() {
   return (
     <div className="stack">
       {isAdmin && (
-        <nav className="crumbs">
-          <Link href="/">企業一覧</Link> › {company.name}
-        </nav>
+        <Breadcrumbs items={[{ label: "企業一覧", href: "/" }, { label: company.name }]} />
       )}
       <div className="title-row">
         <div>
@@ -154,14 +153,14 @@ function BusinessList({
                 {isAdmin && (
                   <td>
                     <button
-                      className="icon danger"
+                      className="btn-delete"
                       title="削除"
                       onClick={() =>
                         confirm(`「${b.name}」とそのAS-IS/TO-BEを削除しますか？`) &&
                         guard(() => api.deleteBusiness(b.id).then(onChange))
                       }
                     >
-                      ×
+                      削除
                     </button>
                   </td>
                 )}
@@ -242,7 +241,7 @@ function ResourceManager({
   const hint: Record<ResourceKind, string> = {
     部署: "スイムレーンに使えます",
     担当者: "役割名（例：経理担当）。スイムレーンに使えます",
-    取引先: "社外の列（色が変わります）",
+    取引先: "社外の列（取引先など）",
     システム: "作業の「道具（札）」で選べます",
     帳票: "作業の「道具（札）」で選べます。紙として集計されます",
   };
@@ -266,11 +265,13 @@ function ResourceManager({
                     }
                   />
                   <button
-                    className="icon danger"
+                    className="btn-delete"
                     title="削除"
-                    onClick={() => guard(() => api.deleteResource(r.id).then(onChange))}
+                    onClick={() =>
+                      confirm(`「${r.name}」を削除しますか？`) && guard(() => api.deleteResource(r.id).then(onChange))
+                    }
                   >
-                    ×
+                    削除
                   </button>
                 </li>
               ))}
@@ -326,11 +327,11 @@ function UserManager({
                 <td>{u.business_ids.map(bname).join("、") || <span className="muted">なし</span>}</td>
                 <td>
                   <button
-                    className="icon danger"
+                    className="btn-delete"
                     title="削除"
                     onClick={() => confirm(`${u.name} を削除しますか？`) && guard(() => api.deleteUser(u.id).then(onChange))}
                   >
-                    ×
+                    削除
                   </button>
                 </td>
               </tr>

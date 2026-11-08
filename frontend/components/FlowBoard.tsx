@@ -5,15 +5,15 @@
  *  - 列 = 担当（取引先などの社外は色を変える）
  *  - 人のアイコン＋作業名、画面アイコン（PC作業）、色付きの札（使っている道具）
  *  - 矢印のラベル = 受け渡し手段（FAX・メール・配達…）
- *  - 赤丸の番号 = ボトルネック、¥ = お金の流れ
+ *  - 作業名が赤 = ボトルネック、¥ = お金の流れ
  *  - 右側 = ボトルネック一覧（TO-BEは改善ポイント）、3つの集計、経営者の認識／現場の実態
  */
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import {
-  addLane, addStepAt, connect, disconnect, insertBelow, moveLane, moveStep, removeLane, removeStep,
+  addLane, addStepAt, connect, disconnect, insertBelow, moveLaneTo, moveStep, removeLane, removeStep, renameLane,
 } from "@/lib/edit";
 import {
-  TOOL_STYLE, bottleneckNumbers, classifyTool, counters, layout, mediaColor, type Placed,
+  TOOL_STYLE, bottleneckNumbers, classifyTool, counters, layout, mediaColor, toolLabel, type Placed,
 } from "@/lib/flow";
 import { CHANGE_COLORS, type Flow, type Resource, type Step } from "@/lib/types";
 import { EdgeInspector, NodeInspector } from "./Inspector";
@@ -25,7 +25,8 @@ const RH = 178; // 行の高さ
 const ICON_H = 84;
 const LABEL_H = 52;
 
-const EXTERNAL = /取引先|顧客|お客|仕入|得意先|外部|委託/;
+const LANE_BG = "#f2f3f5"; // 列の背景（グレー）
+const LINE = "#9aa3ae"; // 矢印の線（グレーに統一）
 
 interface Props {
   flow: Flow;
@@ -36,6 +37,9 @@ interface Props {
   execView?: string;
   fieldView?: string;
   exporting?: boolean;
+  /** 画像・PDFに出力するときだけ上に出す見出し */
+  exportTitle?: string;
+  exportSub?: string;
   /** true なら図の上で直接編集できる（追加・移動・矢印・削除） */
   editable?: boolean;
   /** merge=true は文字入力（続けて打った分は「元に戻す」1回にまとめる） */
@@ -45,19 +49,28 @@ interface Props {
 export type Selection = { type: "node"; id: string } | { type: "edge"; from: string; to: string } | null;
 
 function iconRowWidth(s: Step) {
-  return 52 + (s.pc ? 12 + 58 : 0) + (s.tool ? 12 + 104 : 0);
+  // 人 ＋ 札（PC作業は札の中の画面マーク）。札がなくPC作業だけなら小さな画面
+  return 52 + (s.tool ? 12 + 104 : s.pc ? 12 + 44 : 0);
+}
+
+/** 作業の枠の幅：中身（人＋札、作業名）に合わせる。枠いっぱいの固定幅にしないことで、矢印やラベルと重ならない */
+function nodeWidth(s: Step) {
+  const label = Math.min(236, [...(s.name || "（作業名を入力）")].length * 14);
+  return Math.max(iconRowWidth(s), label) + 24;
 }
 
 function geom(p: Placed) {
   const cx = p.col * CW + CW / 2;
   const y0 = HEADER + PAD + p.row * RH;
-  const w = iconRowWidth(p.step);
+  const w = nodeWidth(p.step);
   return {
     cx,
     y0,
+    w,
     cy: y0 + ICON_H / 2,
-    left: cx - w / 2 - 8,
-    right: cx + w / 2 + 8,
+    // 矢印は枠の外側から出入りする
+    left: cx - w / 2 - 4,
+    right: cx + w / 2 + 4,
     top: y0 - 6,
     bottom: y0 + ICON_H + LABEL_H,
   };
@@ -90,7 +103,7 @@ function buildEdges(flow: Flow, placed: Map<string, Placed>): Edge[] {
       const gb = geom(b);
       const media = s.next_media[i] ?? "";
       const label = [s.condition_labels[i] ?? "", media].filter(Boolean).join(" / ");
-      const color = media ? mediaColor(media) : "#6b7385";
+      const color = media ? mediaColor(media) : "#6b7385"; // ラベルの文字色（線はグレーに統一）
       let d: string;
       let end: [number, number];
       let angle: number;
@@ -125,7 +138,7 @@ function buildEdges(flow: Flow, placed: Map<string, Placed>): Edge[] {
         angle = toRight ? 0 : Math.PI;
         if (a.row === b.row) {
           d = `M${sx},${sy} L${tx},${ty}`;
-          lx = sx + (tx - sx) * 0.4; // 受け取り側の赤丸と重ならないよう、少し出発側に寄せる
+          lx = sx + (tx - sx) * 0.4; // 受け取り側の人と重ならないよう、少し出発側に寄せる
           ly = sy;
           horizontal = true;
         } else {
@@ -167,9 +180,9 @@ function Person() {
   );
 }
 
-function Monitor() {
+function Monitor({ small }: { small?: boolean }) {
   return (
-    <svg width="58" height="56" viewBox="0 0 58 56" aria-hidden>
+    <svg width={small ? 44 : 58} height={small ? 42 : 56} viewBox="0 0 58 56" aria-hidden>
       <rect x="2" y="2" width="54" height="38" rx="2" fill="#dde6ef" stroke="#3d4b5c" strokeWidth="3" />
       <rect x="25" y="40" width="8" height="8" fill="#3d4b5c" />
       <rect x="15" y="48" width="28" height="5" rx="1" fill="#3d4b5c" />
@@ -177,22 +190,60 @@ function Monitor() {
   );
 }
 
-function ToolTag({ tool, resources }: { tool: string; resources: Resource[] }) {
+function ToolTag({ tool, resources, pc }: { tool: string; resources: Resource[]; pc: boolean }) {
   const st = TOOL_STYLE[classifyTool(tool, resources)];
   return (
     <div className="fb-tag" style={{ borderColor: st.bar, background: st.bg, color: st.fg }}>
-      <div className="fb-tag-bar" style={{ background: st.bar }} />
-      <span>{tool}</span>
+      <div className="fb-tag-bar" style={{ background: st.bar }}>
+        {pc && <ScreenMark />}
+      </div>
+      <span>{toolLabel(tool)}</span>
     </div>
   );
 }
 
+/** 札の上の帯に入れる、小さな画面マーク（PC作業） */
+function ScreenMark() {
+  return (
+    <svg className="fb-screen-mark" width="16" height="12" viewBox="0 0 16 12" aria-label="PC作業">
+      <rect x="1" y="1" width="14" height="8" rx="1" fill="none" stroke="#fff" strokeWidth="1.6" />
+      <rect x="5" y="10" width="6" height="1.6" fill="#fff" />
+    </svg>
+  );
+}
+
+/** ボトルネックの作業にマウスを乗せたときの説明 */
+function issueTip(s: Step) {
+  return [
+    "ボトルネック",
+    s.issue_time && `時間がかかる理由：${s.issue_time}`,
+    s.issue_error && `ミスの原因：${s.issue_error}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** 「？ 操作方法」に出す一覧 */
+const HELP: [string, string][] = [
+  ["作業を追加", "空いているマスをクリック（作業を選んだ状態なら、その作業から矢印でつながる）"],
+  ["作業を設定", "作業をクリック → 右のパネルで道具・印・ボトルネックなどを選ぶ"],
+  ["作業名を変える", "作業をダブルクリック（または右のパネルの「作業名」の欄をクリック）"],
+  ["作業を移動", "作業をドラッグして、置きたいマスで離す"],
+  ["矢印でつなぐ", "作業を選ぶと右に出る → を、つなぎたい作業までドラッグ"],
+  ["受け渡し手段", "矢印かラベルをクリック → 右のパネルでメール・FAXなどを選ぶ"],
+  ["削除", "作業か矢印を選んで Delete キー（右のパネルの削除ボタンでも可）"],
+  ["元に戻す", "Ctrl + Z（Mac は ⌘ + Z）、または上の「元に戻す」"],
+  ["列（担当）を追加", "図の右上の ＋"],
+  ["列の名前を変える", "列の見出しをダブルクリック"],
+  ["列の順番を変える", "列の見出しをつかんで、左右にドラッグ"],
+  ["列を削除", "列の見出しの ×（その列の作業も一緒に削除。「元に戻す」で戻せる）"],
+  ["全体を見る", "「全体を表示」。細かく作業するときは「100%」"],
+];
+
 // ---------------- 本体 ----------------
-const ADD_COL_W = 210; // 「＋列を追加」の幅
-const NODE_W = 260;
 
 export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
-  { flow, resources, kind, base, execView, fieldView, exporting, editable: editableProp, onChange },
+  { flow, resources, kind, base, execView, fieldView, exporting, exportTitle, exportSub, editable: editableProp, onChange },
   ref,
 ) {
   const editable = !!editableProp && !!onChange && !exporting;
@@ -200,14 +251,30 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
   const lay = useMemo(() => layout(flow, { includeEmptyLanes: !!editableProp }), [flow, editableProp]);
   const edges = useMemo(() => buildEdges(flow, lay.placed), [flow, lay]);
   const nums = useMemo(() => bottleneckNumbers(flow, lay), [flow, lay]);
-  const external = new Set(resources.filter((r) => r.kind === "取引先").map((r) => r.name));
-  const isExternal = (lane: string) => external.has(lane) || EXTERNAL.test(lane);
 
   const [sel, setSel] = useState<Selection>(null);
-  const [focusName, setFocusName] = useState(0); // 増えたら作業名の入力欄にカーソルを置く
+  // 作業をダブルクリックしたときだけ、その作業の名前欄にカーソルを置く（選択・追加では置かない）
+  const [focusFor, setFocusFor] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ id: string; sx: number; sy: number; dx: number; dy: number; moved: boolean } | null>(null);
   const [link, setLink] = useState<{ from: string; x: number; y: number } | null>(null);
+  // 「＋列を追加」のメニュー（開いている位置。画面上の座標）
+  const [laneMenu, setLaneMenu] = useState<{ top: number; left: number } | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null); // 名前を変えている列
+  const [helpOpen, setHelpOpen] = useState(false); // 「？ 操作方法」
+  // 列の見出しをドラッグして並べ替え中
+  const [laneDrag, setLaneDrag] = useState<{ lane: string; sx: number; dx: number; moved: boolean } | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  /** 列を追加したら、右端までスクロールして見せる */
+  /** 列を追加したら、手動で大きさを変えていても「全部の列が見える大きさ」に戻す */
+  const addLaneAndShow = (name: string) => {
+    change(addLane(flow, name));
+    setZoom("fit");
+    setTimeout(() => {
+      scrollRef.current?.scrollTo({ left: 0, behavior: "smooth" });
+      scrollRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 50);
+  };
 
   // 選択中のものが消えたら選択を外す
   const selValid =
@@ -218,16 +285,54 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
   const selectedNodeId = selection?.type === "node" ? selection.id : null;
 
   const rows = Math.max(1, lay.rows) + (editable ? 1 : 0);
-  const width = Math.max(1, lay.lanes.length) * CW + (editable ? ADD_COL_W : 0);
+  const ADD_BTN_W = editable ? 72 : 0; // 右端の「＋」（列を追加）ボタンの幅
+  const width = Math.max(1, lay.lanes.length) * CW + ADD_BTN_W;
   const height = HEADER + PAD + rows * RH;
-  let internalIdx = 0;
+
+  // ---- 表示の大きさ（ズーム）。"fit" は横幅に合わせて自動で縮める（列が増えても全部見える） ----
+  const [zoom, setZoom] = useState<"fit" | number>("fit");
+  const [boxW, setBoxW] = useState(0);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // 狭くなったときは必ず合わせ直す（はみ出さないように）。
+    // 広くなったときは、数px程度（スクロールバーの出入りなど）なら計算し直さない。
+    // 「縮む→スクロールバーが消える→広がる→また大きくなる」の繰り返しで画面が揺れるのを防ぐ
+    const ro = new ResizeObserver(() =>
+      setBoxW((prev) => {
+        const w = el.clientWidth;
+        return w < prev || w - prev >= 24 ? w : prev;
+      }),
+    );
+    ro.observe(el);
+    setBoxW(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  const fitScale = boxW ? Math.min(1, boxW / width) : 1;
+  const scale = exporting ? 1 : zoom === "fit" ? Math.max(0.35, fitScale) : zoom;
+  /** 縦も含めて、図の全体が画面に収まる大きさにする */
+  const fitAll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top;
+    const h = Math.max(200, window.innerHeight - Math.max(top, 0) - 24);
+    setZoom(Math.max(0.3, Math.min(1, el.clientWidth / width, h / height)));
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const zoomBy = (d: number) => setZoom(Math.round(Math.min(1.5, Math.max(0.3, scale + d)) * 10) / 10);
 
   const change = (f: Flow, merge = false) => onChange?.(f, merge);
+  /** 図をクリックしたら、設定パネルの入力欄からカーソルを外す（そのまま Delete で削除できるように） */
+  const releaseFocus = () => {
+    const el = document.activeElement as HTMLElement | null;
+    if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT")) el.blur();
+  };
 
   // ---- 座標 ----
   const point = (e: { clientX: number; clientY: number }) => {
     const r = boardRef.current!.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    // 縮小表示中は、画面上の位置を図の座標に戻す
+    return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
   };
   const cellAt = (x: number, y: number) => {
     const col = Math.floor(x / CW);
@@ -238,7 +343,7 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
   const nodeAt = (x: number, y: number) =>
     [...lay.placed.values()].find((p) => {
       const g = geom(p);
-      return x >= g.cx - NODE_W / 2 && x <= g.cx + NODE_W / 2 && y >= g.y0 - 10 && y <= g.y0 + ICON_H + LABEL_H + 10;
+      return x >= g.cx - g.w / 2 && x <= g.cx + g.w / 2 && y >= g.y0 - 10 && y <= g.y0 + ICON_H + LABEL_H + 10;
     });
 
   // ---- ドラッグ（移動）と、つまみからの矢印 ----
@@ -301,11 +406,42 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
     return () => window.removeEventListener("keydown", key);
   });
 
+  // ---- 列の見出しのドラッグ（並べ替え） ----
+  const laneSlot = (clientX: number) => {
+    const r = boardRef.current?.getBoundingClientRect();
+    if (!r) return null;
+    const x = (clientX - r.left) / scale;
+    return Math.max(0, Math.min(lay.lanes.length, Math.round(x / CW)));
+  };
+  const [laneDropSlot, setLaneDropSlot] = useState<number | null>(null);
+  useEffect(() => {
+    if (!laneDrag) return;
+    const move = (e: PointerEvent) => {
+      const dx = e.clientX - laneDrag.sx;
+      const moved = laneDrag.moved || Math.abs(dx) > 6;
+      setLaneDrag({ ...laneDrag, dx, moved });
+      setLaneDropSlot(moved ? laneSlot(e.clientX) : null);
+    };
+    const up = (e: PointerEvent) => {
+      if (laneDrag.moved) {
+        const slot = laneSlot(e.clientX);
+        if (slot !== null) change(moveLaneTo(flow, lay.lanes, laneDrag.lane, slot));
+      }
+      setLaneDrag(null);
+      setLaneDropSlot(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+  });
+
   const addAt = (col: number, row: number) => {
     const { flow: f, id } = addStepAt(flow, lay.lanes[col], row, isTobe, selectedNodeId);
     change(f);
     setSel({ type: "node", id });
-    setFocusName((n) => n + 1);
   };
 
   const occupied = new Set([...lay.placed.values()].map((p) => `${p.col}:${p.row}`));
@@ -314,57 +450,169 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
         const g = lay.placed.get(drag.id);
         if (!g) return null;
         const gg = geom(g);
-        return cellAt(gg.cx + drag.dx, gg.y0 + 40 + drag.dy);
+        return cellAt(gg.cx + drag.dx / scale, gg.y0 + 40 + drag.dy / scale);
       })()
     : null;
   const linkFrom = link ? lay.placed.get(link.from) : null;
 
   const selectedStep = selectedNodeId ? flow.steps.find((s) => s.id === selectedNodeId) ?? null : null;
 
+  // 今の状態に合わせて「次の操作」を1行だけ案内する
+  const guideText = laneDrag?.moved
+    ? "青い線の位置で離すと、列（中の作業ごと）がそこへ移動します"
+    : link
+    ? "つなぎたい作業の上で離すと、矢印ができます"
+    : drag?.moved
+      ? "置きたいマスで離すと、そこへ移動します"
+      : lay.lanes.length === 0
+        ? "図の右上の ＋ を押して、列（担当）を追加しましょう"
+        : flow.steps.length === 0
+          ? "空いているマスをクリックすると、作業を追加できます"
+          : selection?.type === "node" && !selectedStep?.name
+            ? "作業名を入れるには、作業をダブルクリックするか、右の「作業名」の欄をクリックします"
+          : selection?.type === "node"
+            ? "右の → をドラッグして矢印でつなぐ ／ 作業をドラッグして移動 ／ Delete で削除"
+            : selection?.type === "edge"
+              ? "右のパネルで受け渡し手段（メール・FAXなど）を選べます ／ Delete で削除"
+              : "作業をクリックすると設定が開きます ／ 空いているマスをクリックで作業を追加";
+
   return (
     <div ref={ref} className={`fb-wrap${exporting ? " exporting" : ""}`}>
+      {exporting && exportTitle && (
+        <div className="fb-export-title">
+          <b>{exportTitle}</b>
+          {exportSub && <span>{exportSub}</span>}
+        </div>
+      )}
       <div className="fb-main">
         {editable && (
-          <div className="fb-hint">
-            <span><b>空いているマス</b>をクリック：作業を追加（選択中の作業から矢印でつながる）</span>
-            <span><b>ドラッグ</b>：移動</span>
-            <span><b>●</b>をドラッグ：矢印でつなぐ</span>
-            <span><b>Delete</b>：削除</span>
-            <span><b>Ctrl+Z</b>：元に戻す</span>
+          <div className="fb-guide">
+            <span className="fb-guide-tag">次の操作</span>
+            <span className="fb-guide-text">{guideText}</span>
+            <span className="fb-help-wrap">
+              <button className="btn ghost small-btn" onClick={() => setHelpOpen((v) => !v)}>
+                ？ 操作方法
+              </button>
+              {helpOpen && (
+                <>
+                  <div className="fb-pop-backdrop" onPointerDown={() => setHelpOpen(false)} />
+                  <div className="fb-help">
+                    <div className="fb-help-head">
+                      <b>図の操作方法</b>
+                      <button className="icon" title="閉じる" onClick={() => setHelpOpen(false)}>
+                        ×
+                      </button>
+                    </div>
+                    <table>
+                      <tbody>
+                        {HELP.map(([what, how]) => (
+                          <tr key={what}>
+                            <th>{what}</th>
+                            <td>{how}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </span>
           </div>
         )}
-        <div className="fb-scroll">
+        {!exporting && (flow.steps.length > 0 || editable) && (
+          <div className="fb-zoom">
+            <span className="muted small">表示の大きさ</span>
+            <button className="btn ghost small-btn" title="縮小" onClick={() => zoomBy(-0.1)}>
+              －
+            </button>
+            <span className="fb-zoom-val">{Math.round(scale * 100)}%</span>
+            <button className="btn ghost small-btn" title="拡大" onClick={() => zoomBy(0.1)}>
+              ＋
+            </button>
+            <button className={`btn ghost small-btn${zoom === "fit" ? " on" : ""}`} onClick={() => setZoom("fit")}>
+              横幅に合わせる
+            </button>
+            <button className="btn ghost small-btn" onClick={fitAll}>
+              全体を表示
+            </button>
+            <button className="btn ghost small-btn" onClick={() => setZoom(1)}>
+              100%
+            </button>
+          </div>
+        )}
+        <div className="fb-scroll" ref={scrollRef}>
           {!editable && flow.steps.length === 0 ? (
             <div className="fb-empty">まだ作業がありません</div>
           ) : (
+            <div className="fb-sizer" style={{ width: width * scale, height: height * scale }}>
             <div
               ref={boardRef}
               className={`fb-board${editable ? " editing" : ""}${link ? " linking" : ""}`}
-              style={{ width, height }}
+              style={{
+                width,
+                height,
+                transform: scale !== 1 ? `scale(${scale})` : undefined,
+                transformOrigin: "0 0",
+              }}
               onPointerDown={(e) => {
-                if (editable && e.target === e.currentTarget) setSel(null);
+                if (editable && e.target === e.currentTarget) {
+                  releaseFocus();
+                  setSel(null);
+                }
               }}
             >
               {lay.lanes.map((lane, i) => {
-                const ext = isExternal(lane);
-                const bg = ext ? "#fdf6ea" : internalIdx++ % 2 === 0 ? "#f1f5fa" : "#eff6f1";
-                const empty = !flow.steps.some((s) => (s.lane || "（未設定）") === lane);
+                const bg = LANE_BG; // 列の背景はすべてグレー
                 return (
                   <div key={lane} className="fb-lane" style={{ left: i * CW, width: CW - 6, height }}>
-                    <div className="fb-lane-head">
-                      {editable && i > 0 && (
-                        <button className="fb-lane-btn" title="左へ" onClick={() => change(moveLane(flow, lane, -1))}>
-                          ‹
-                        </button>
+                    <div
+                      className={`fb-lane-head${editable ? " draggable" : ""}${laneDrag?.lane === lane && laneDrag.moved ? " dragging" : ""}`}
+                      style={
+                        laneDrag?.lane === lane && laneDrag.moved
+                          ? { transform: `translateX(${laneDrag.dx / scale}px)` }
+                          : undefined
+                      }
+                      title={editable ? "ドラッグで列を移動／ダブルクリックで名前を変更" : undefined}
+                      onPointerDown={(e) => {
+                        if (!editable || renaming === lane || e.button !== 0) return;
+                        if ((e.target as HTMLElement).closest("button, input")) return;
+                        e.preventDefault();
+                        releaseFocus();
+                        setLaneDrag({ lane, sx: e.clientX, dx: 0, moved: false });
+                      }}
+                    >
+                      {renaming === lane ? (
+                        <input
+                          className="fb-lane-rename"
+                          autoFocus
+                          defaultValue={lane}
+                          onBlur={(e) => {
+                            change(renameLane(flow, lane, e.target.value));
+                            setRenaming(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                            if (e.key === "Escape") setRenaming(null);
+                          }}
+                        />
+                      ) : (
+                        <span onDoubleClick={() => editable && setRenaming(lane)}>
+                          {lane}
+                        </span>
                       )}
-                      <span>{lane}</span>
-                      {editable && i < lay.lanes.length - 1 && (
-                        <button className="fb-lane-btn" title="右へ" onClick={() => change(moveLane(flow, lane, 1))}>
-                          ›
-                        </button>
-                      )}
-                      {editable && empty && (
-                        <button className="fb-lane-btn del" title="この列を外す" onClick={() => change(removeLane(flow, lane))}>
+                      {editable && (
+                        <button
+                          className="fb-lane-btn del"
+                          title="この列を削除"
+                          aria-label={`「${lane}」の列を削除`}
+                          onClick={() => {
+                            const n = flow.steps.filter((s) => (s.lane || "（未設定）") === lane).length;
+                            if (n > 0 && !confirm(`「${lane}」の列を削除すると、この列の作業${n}件も一緒に削除されます。よろしいですか？\n（「元に戻す」で戻せます）`)) return;
+                            change(removeLane(flow, lane));
+                            setSel(null);
+                            setZoom("fit");
+                          }}
+                        >
                           ×
                         </button>
                       )}
@@ -372,21 +620,37 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
                     <div
                       className="fb-lane-body"
                       style={{ background: bg }}
-                      onPointerDown={() => editable && setSel(null)}
+                      onPointerDown={() => {
+                        if (!editable) return;
+                        releaseFocus();
+                        setSel(null);
+                      }}
                     />
                   </div>
                 );
               })}
 
-              {editable && (
-                <AddLaneColumn
-                  left={lay.lanes.length * CW}
-                  height={height}
-                  resources={resources}
-                  lanes={flow.lanes}
-                  onAdd={(name) => change(addLane(flow, name))}
-                />
+              {laneDrag?.moved && laneDropSlot !== null && (
+                <div className="fb-lane-drop" style={{ left: laneDropSlot * CW - 5, height }} />
               )}
+
+              {editable && (
+                <button
+                  className="fb-addlane-btn"
+                  style={{ left: lay.lanes.length * CW, width: ADD_BTN_W - 10 }}
+                  title="列（担当）を追加"
+                  aria-label="列（担当）を追加"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    if (laneMenu) return setLaneMenu(null);
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setLaneMenu({ top: r.bottom + 6, left: Math.max(8, Math.min(r.left, window.innerWidth - 290)) });
+                  }}
+                >
+                  ＋
+                </button>
+              )}
+
 
               {/* 空いているマス（クリックで追加） */}
               {editable &&
@@ -411,14 +675,15 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
                   const on = selection?.type === "edge" && selection.from === e.from && selection.to === e.to;
                   return (
                     <g key={e.key}>
-                      <path d={e.d} fill="none" stroke={on ? "#0b5cad" : e.color} strokeWidth={on ? 3.5 : 2.2} />
-                      <polygon points={arrowHead(e.end, e.angle)} fill={on ? "#0b5cad" : e.color} />
+                      <path d={e.d} fill="none" stroke={on ? "#0b5cad" : LINE} strokeWidth={on ? 3.5 : 2} />
+                      <polygon points={arrowHead(e.end, e.angle)} fill={on ? "#0b5cad" : LINE} />
                       {editable && (
                         <path
                           d={e.d}
                           className="fb-edge-hit"
                           onPointerDown={(ev) => {
                             ev.stopPropagation();
+                            releaseFocus();
                             setSel({ type: "edge", from: e.from, to: e.to });
                           }}
                         />
@@ -445,10 +710,11 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
                   <div
                     key={`l-${e.key}`}
                     className={`fb-pill${e.media ? "" : " cond"}${e.horizontal ? " above" : ""}${editable ? " clickable" : ""}`}
-                    style={{ left: e.lx, top: e.ly, borderColor: e.color, color: e.color }}
+                    style={{ left: e.lx, top: e.ly, color: e.color }}
                     onPointerDown={(ev) => {
                       if (!editable) return;
                       ev.stopPropagation();
+                      releaseFocus();
                       setSel({ type: "edge", from: e.from, to: e.to });
                     }}
                   >
@@ -459,30 +725,31 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
               {[...lay.placed.values()].map((p) => {
                 const g = geom(p);
                 const s = p.step;
-                const num = nums.get(s.id);
                 const changeColor = s.change ? CHANGE_COLORS[s.change] : null;
                 const dragging = drag?.id === s.id && drag.moved;
                 return (
                   <div
                     key={s.id}
-                    className={`fb-node${selectedNodeId === s.id ? " selected" : ""}${editable ? " clickable" : ""}${dragging ? " dragging" : ""}`}
+                    className={`fb-node${selectedNodeId === s.id ? " selected" : ""}${editable ? " clickable" : ""}${dragging ? " dragging" : ""}${s.name ? "" : " unnamed"}${changeColor ? " has-change" : ""}`}
                     style={{
-                      left: g.cx - NODE_W / 2,
+                      left: g.cx - g.w / 2,
+                      width: g.w,
                       top: g.y0,
-                      transform: dragging ? `translate(${drag!.dx}px, ${drag!.dy}px)` : undefined,
-                      ...(changeColor ? { borderColor: changeColor, background: `${changeColor}12` } : {}),
+                      transform: dragging ? `translate(${drag!.dx / scale}px, ${drag!.dy / scale}px)` : undefined,
+                      ...(changeColor ? { borderColor: changeColor, background: `${changeColor}12`, ["--chg" as string]: changeColor } : {}),
                     }}
                     onPointerDown={(e) => {
                       if (!editable || e.button !== 0) return;
                       e.preventDefault();
+                      releaseFocus();
                       setDrag({ id: s.id, sx: e.clientX, sy: e.clientY, dx: 0, dy: 0, moved: false });
                     }}
                     onDoubleClick={() => {
                       if (!editable) return;
                       setSel({ type: "node", id: s.id });
-                      setFocusName((n) => n + 1);
+                      setFocusFor(s.id);
                     }}
-                    title={editable ? undefined : [s.issue && `ボトルネック：${s.issue}`, s.issue_detail, s.note].filter(Boolean).join("\n")}
+                    title={editable ? undefined : [s.issue && issueTip(s), s.note].filter(Boolean).join("\n")}
                   >
                     {s.change && (
                       <span className="fb-change" style={{ background: changeColor! }}>
@@ -492,17 +759,18 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
                     <div className="fb-icons">
                       <div className="fb-person">
                         <Person />
-                        {num !== undefined && <span className="fb-num">{num}</span>}
                         {s.money && <span className="fb-yen">¥</span>}
                       </div>
-                      {s.pc && <Monitor />}
-                      {s.tool && <ToolTag tool={s.tool} resources={resources} />}
+                      {s.tool ? (
+                        <ToolTag tool={s.tool} resources={resources} pc={s.pc} />
+                      ) : (
+                        s.pc && <Monitor small />
+                      )}
                     </div>
-                    <div className="fb-label">
+                    <div className={`fb-label${s.issue ? " issue" : ""}`} title={s.issue ? issueTip(s) : undefined}>
                       {s.name || <span className="muted">（作業名を入力）</span>}
                       <span className="fb-meta">
                         {s.type !== "作業" && <span className="fb-type">{s.type}</span>}
-                        {s.minutes > 0 && <span>{s.minutes}分</span>}
                       </span>
                     </div>
                     {editable && selectedNodeId === s.id && (
@@ -523,9 +791,28 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
                 );
               })}
             </div>
+            </div>
           )}
         </div>
-        <Legend tobe={isTobe} maxWidth={flow.steps.length ? width : undefined} />
+        {editable && laneMenu && (
+          <>
+            <div className="fb-pop-backdrop" onPointerDown={() => setLaneMenu(null)} />
+            <div className="fb-addlane-pop" style={{ top: laneMenu.top, left: laneMenu.left }}>
+              <AddLaneForm
+                resources={resources}
+                lanes={flow.lanes}
+                onAdd={(name) => {
+                  addLaneAndShow(name);
+                  setLaneMenu(null);
+                }}
+              />
+              <button className="icon" title="閉じる" onClick={() => setLaneMenu(null)}>
+                ×
+              </button>
+            </div>
+          </>
+        )}
+        <Legend tobe={isTobe} maxWidth={flow.steps.length ? width - ADD_BTN_W : undefined} />
       </div>
       {editable && selection?.type === "node" && selectedStep ? (
         <NodeInspector
@@ -534,14 +821,14 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
           flow={flow}
           resources={resources}
           isTobe={isTobe}
-          focusName={focusName}
+          focusName={focusFor === selectedStep.id}
+          onFocused={() => setFocusFor(null)}
           onChange={change}
           onClose={() => setSel(null)}
           onInsertBelow={() => {
             const { flow: f, id } = insertBelow(flow, selectedStep.id, isTobe);
             change(f);
             setSel({ type: "node", id });
-            setFocusName((n) => n + 1);
           }}
           onSelectEdge={(to) => setSel({ type: "edge", from: selectedStep.id, to })}
         />
@@ -570,17 +857,17 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
   );
 });
 
-function AddLaneColumn({
-  left, height, resources, lanes, onAdd,
-}: { left: number; height: number; resources: Resource[]; lanes: string[]; onAdd: (name: string) => void }) {
+/** リソースから選ぶか、名前を入れて列を追加するフォーム */
+function AddLaneForm({
+  resources, lanes, onAdd,
+}: { resources: Resource[]; lanes: string[]; onAdd: (name: string) => void }) {
   const [text, setText] = useState("");
   const candidates = resources
     .filter((r) => ["部署", "担当者", "取引先"].includes(r.kind) && !lanes.includes(r.name))
     .map((r) => r.name);
   return (
-    <div className="fb-addlane" style={{ left, width: ADD_COL_W - 10, height }}>
-      <div className="fb-addlane-head">＋ 列（担当）を追加</div>
-      <div className="fb-addlane-body">
+    <div className="fb-addlane-form">
+        {candidates.length === 0 && <p className="insp-note">リソースの候補はすべて追加済みです。名前を入れて追加できます。</p>}
         {candidates.map((n) => (
           <button key={n} className="chip-btn" onClick={() => onAdd(n)}>
             ＋ {n}
@@ -607,7 +894,6 @@ function AddLaneColumn({
         >
           追加
         </button>
-      </div>
     </div>
   );
 }
@@ -630,7 +916,7 @@ function SidePanel({
       {kind === "asis" ? (
         <>
           <div className="fb-side-head red">ボトルネック</div>
-          <IssueList issues={issues} nums={nums} empty="ボトルネックのあるステップに「見出し」を入れると、ここに一覧が出ます" />
+          <IssueList issues={issues} nums={nums} empty="作業をクリックして「ボトルネックにする」を押すと、ここに一覧が出ます" />
         </>
       ) : (
         <>
@@ -642,7 +928,7 @@ function SidePanel({
                   排除
                 </span>
                 <div>
-                  <b className="strike">{s.name}</b>
+                  <b className="strike">{s.name || "（名前なし）"}</b>
                   <small>TO-BEではなくなった作業</small>
                 </div>
               </li>
@@ -698,16 +984,40 @@ function SidePanel({
 }
 
 function IssueList({ issues, nums, empty }: { issues: Step[]; nums: Map<string, number>; empty?: string }) {
+  // 図の上から順（同じ高さは左から）に並べる
+  const sorted = [...issues].sort((a, b) => (nums.get(a.id) ?? 0) - (nums.get(b.id) ?? 0));
   return (
     <ul className="fb-issues">
-      {issues.map((s) => (
-        <li key={s.id}>
-          <span className="fb-num static">{nums.get(s.id)}</span>
-          <div>
-            <b>{s.issue}</b>
-            {s.issue_detail && <small>{s.issue_detail}</small>}
+      {sorted.map((s) => (
+        <li key={s.id} className="fb-issue">
+          <div className="fb-issue-head">
+            <b className="fb-issue-task">{s.name || "（名前なし）"}</b>
           </div>
-          {s.third_party && <span className="fb-third">第三者の気づき</span>}
+          <dl className="fb-issue-body">
+            {s.issue_time && (
+              <>
+                <dt className="time">時間がかかる理由</dt>
+                <dd>{s.issue_time}</dd>
+              </>
+            )}
+            {s.issue_error && (
+              <>
+                <dt className="error">ミスの原因</dt>
+                <dd>{s.issue_error}</dd>
+              </>
+            )}
+            {!s.issue_time && !s.issue_error && (
+              // 以前の形（見出し・説明）で入力されたもの
+              <>
+                <dt>内容</dt>
+                <dd>
+                  {[s.issue !== "ボトルネック" ? s.issue : "", s.issue_detail].filter(Boolean).join("／") || (
+                    <span className="muted">理由・原因が未入力です（作業をクリックして入力）</span>
+                  )}
+                </dd>
+              </>
+            )}
+          </dl>
         </li>
       ))}
       {issues.length === 0 && empty && <li className="muted small">{empty}</li>}
@@ -738,13 +1048,12 @@ function Legend({ tobe, maxWidth }: { tobe: boolean; maxWidth?: number }) {
     <div className="fb-legend" style={{ maxWidth }}>
       <span>凡例：</span>
       <span>人＝担当者</span>
-      <span>画面＝PC作業</span>
-      <span>色付きの札＝使っている道具（エクセル・FAX・紙など）</span>
+      <span>札の画面マーク＝PC作業</span>
+      <span>色付きの札＝使っている道具（Excel・Word・システム・紙など）</span>
       <span>
-        <i className="fb-num mini">1</i>＝ボトルネック
+        <b className="fb-legend-issue">赤い作業名</b>＝ボトルネック
       </span>
       <span>¥＝お金の流れ</span>
-      <span>第三者の気づき＝現場が当たり前と思っていた点</span>
       {tobe &&
         Object.entries(CHANGE_COLORS)
           .filter(([k]) => k !== "排除")

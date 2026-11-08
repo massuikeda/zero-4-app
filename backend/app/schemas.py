@@ -21,14 +21,16 @@ class Step(BaseModel):
     row: Optional[int] = Field(None, ge=0)  # 図の行（上から0,1,2…）。未設定なら自動で配置
     type: StepType = "作業"
     name: str = ""
-    tool: str = ""            # 使っている道具（エクセル・手書き・紙の伝票など）＝図の色付きの札
+    tool: str = ""            # 使っている道具（Excel・Word・手書き・紙の伝票など）＝図の色付きの札
     minutes: int = Field(0, ge=0)
     pc: bool = False          # PC作業（図に画面アイコン）
     manual_input: bool = False  # 手入力・転記（集計対象）
     money: bool = False       # お金の流れ（図に¥）
-    issue: Optional[str] = None   # ボトルネックの見出し（あると赤丸の番号が付く）
-    issue_detail: str = ""    # ボトルネックの説明（例：読み間違い・入力の手間）
-    third_party: bool = False  # 第三者の気づき（現場が当たり前と思っていた点）
+    issue: Optional[str] = None   # ボトルネックの印（null でなければボトルネック。作業名が赤くなる）。旧データでは見出し
+    issue_time: str = ""      # 業務の時間がかかっている理由
+    issue_error: str = ""     # ミスの原因
+    issue_detail: str = ""    # 旧データの説明（新しい入力では使わない）
+    third_party: bool = False  # 第三者の気づき（今は画面で使っていない。以前のデータのために残している）
     change: Optional[ChangeAction] = None  # TO-BEの変更区分
     note: str = ""            # 補足（TO-BEでは変更内容）
     next: list[str] = Field(default_factory=list)

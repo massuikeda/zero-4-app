@@ -164,8 +164,30 @@ export function addLane(flow: Flow, name: string): Flow {
   const n = name.trim();
   return n && !flow.lanes.includes(n) ? { ...flow, lanes: [...flow.lanes, n] } : flow;
 }
+/** 列の名前を変える（その列の作業の担当もまとめて変える） */
+export function renameLane(flow: Flow, from: string, to: string): Flow {
+  const n = to.trim();
+  if (!n || n === from || flow.lanes.includes(n)) return flow;
+  return {
+    lanes: flow.lanes.map((l) => (l === from ? n : l)),
+    steps: flow.steps.map((s) => (s.lane === from ? { ...s, lane: n } : s)),
+  };
+}
+/** 列を削除する。その列の作業も削除し、前後の流れはつなぎ直す */
 export function removeLane(flow: Flow, name: string): Flow {
-  return { ...flow, lanes: flow.lanes.filter((l) => l !== name) };
+  let f = flow;
+  for (const s of flow.steps) if ((s.lane || "（未設定）") === name) f = removeStep(f, s.id);
+  return { ...f, lanes: f.lanes.filter((l) => l !== name) };
+}
+/** 列を並べ替える。order は今の見た目の列の並び、slot は「何本目の列の前に入れるか」（0〜列の数） */
+export function moveLaneTo(flow: Flow, order: string[], name: string, slot: number): Flow {
+  const from = order.indexOf(name);
+  if (from < 0) return flow;
+  const to = slot > from ? slot - 1 : slot;
+  if (to === from) return flow;
+  const lanes = order.filter((l) => l !== name);
+  lanes.splice(to, 0, name);
+  return { ...flow, lanes };
 }
 export function moveLane(flow: Flow, name: string, d: -1 | 1): Flow {
   const lanes = [...flow.lanes];

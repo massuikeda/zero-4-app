@@ -4,8 +4,7 @@
  * 書き方（1行＝1作業。上から順に矢印でつなぐ）
  *   取引先：注文書を手書き［手書き］ →FAX
  *   営業部が FAXを見てエクセルに手入力し、倉庫にメールで送る
- *   ※ 読み間違い・入力の手間            … 直前の作業のボトルネック
- *   ※！ 部署間の連絡がメール頼み        … 「！」は第三者の気づき
+ *   ※ 時間：1件ずつ手入力している／ミス：読み間違い … 直前の作業のボトルネック
  *   # 月末に集中                        … # で始まる行は読み飛ばす（メモ用）
  *
  * 読み取るもの
@@ -23,7 +22,8 @@ import { MEDIA, type Flow, type Resource, type Step } from "./types";
 const BULLET = /^\s*(?:[-・*●○◆■□▶>]|\d+[.)．、）]|[（(]\d+[)）])\s*/;
 const EXTERNAL_WORDS = ["取引先", "顧客", "お客様", "お客さん", "仕入先", "得意先"];
 const TOOL_WORDS: [RegExp, string][] = [
-  [/エクセル|excel|xlsx?/i, "エクセル"],
+  [/エクセル|excel|xlsx?/i, "Excel"],
+  [/(?<!パス|キー)ワード|\bword\b|\.docx?\b/i, "Word"], // 「パスワード」「キーワード」は除く
   [/手書き/, "手書き"],
   [/紙の伝票|伝票/, "紙の伝票"],
   [/請求書/, "請求書"],
@@ -75,12 +75,14 @@ export function parseHearing(text: string, resources: Resource[]): ParsedHearing
     if (issue) {
       const prev = steps[steps.length - 1];
       if (prev && issue[2]) {
-        // 「見出し／説明」の形。2つ目以降の ※ 行は見出しに追記する
-        const [title, ...rest] = issue[2].split(/[／/]/).map((x) => x.trim());
-        if (!prev.issue) bottlenecks++;
-        prev.issue = prev.issue ? `${prev.issue}・${title}` : title;
-        if (rest.length) prev.issue_detail = [prev.issue_detail, ...rest].filter(Boolean).join("・");
-        if (issue[1]) prev.third_party = true;
+        // 「時間：…／ミス：…」の形。書き分けがなければ言葉から振り分ける
+        if (prev.issue === null) bottlenecks++;
+        prev.issue = "ボトルネック";
+        for (const part of issue[2].split(/[／/]/).map((x) => x.trim()).filter(Boolean)) {
+          const [kind, text] = classifyIssue(part);
+          if (kind === "error") prev.issue_error = [prev.issue_error, text].filter(Boolean).join("・");
+          else prev.issue_time = [prev.issue_time, text].filter(Boolean).join("・");
+        }
       }
       continue;
     }
@@ -131,7 +133,7 @@ export function parseHearing(text: string, resources: Resource[]): ParsedHearing
 
     const has = (re: RegExp) => tags.some((t) => re.test(t));
     const pc =
-      has(/^(pc|ＰＣ|パソコン)$/i) || /エクセル|excel|システム|パソコン|pc|入力|登録/i.test(line) || /エクセル|システム/.test(tool);
+      has(/^(pc|ＰＣ|パソコン)$/i) || /エクセル|excel|(?<!パス|キー)ワード|\bword\b|システム|パソコン|pc|入力|登録/i.test(line) || /Excel|Word|エクセル|システム/.test(tool);
     const manual =
       has(/^(手入力|転記)$/) || /手入力|転記|打ち込|入力|書き写|作り直|加工し直|作成し直|書き直/.test(line);
     const money = has(/^(¥|￥|お金)$/) || /支払|請求|入金|代金|精算|振込|売上/.test(line);
@@ -174,6 +176,16 @@ function matchLane(name: string, laneNames: string[]): string {
   if (hit) return hit;
   if (EXTERNAL_WORDS.some((w) => name.includes(w))) return laneNames.find((n) => EXTERNAL_WORDS.some((w) => n.includes(w))) ?? name;
   return name;
+}
+
+/**
+ * ※ の行の1つ分を「時間がかかる理由」か「ミスの原因」に振り分ける。
+ * 「時間：」「ミス：」「原因：」の書き分けがあればそれに従い、なければ言葉で判断する
+ */
+function classifyIssue(part: string): ["time" | "error", string] {
+  const m = part.match(/^(時間|ミス|原因|間違い)\s*[：:]\s*(.*)$/);
+  if (m) return [m[1] === "時間" ? "time" : "error", m[2].trim()];
+  return [/ミス|間違|誤|漏れ|抜け|紛失|見落と|読み違/.test(part) ? "error" : "time", part];
 }
 
 function isExternal(lane: string) {
@@ -238,11 +250,11 @@ function shorten(s: string) {
 /** ヒアリングタブに出す書き方の例 */
 export const HEARING_EXAMPLE = `取引先：注文書を手書きして送る →FAX
 営業部：FAXを見てエクセルに手入力（15分） →メール
-※ 手書きのFAXを見て手入力／読み間違い・入力の手間
+※ 時間：手書きの文字を読み取りながら1件ずつ入力している／ミス：手書き文字の読み間違い
 倉庫：ピッキングリストをエクセルで作り直す
-※ 同じ注文をエクセルで加工し直す／二重入力
+※ 時間：同じ注文をエクセルで作り直している（二重入力）／ミス：写し間違い
 倉庫：ピッキング →メール
-※！ 部署間の連絡がメール頼み／見落とし・確認待ち
+※ 時間：メールの確認待ちで作業が止まる／ミス：メールの見落とし
 営業部：支払い（請求）情報をエクセルに入力
 倉庫：出荷 →配達
 取引先：紙の伝票で受領を確認

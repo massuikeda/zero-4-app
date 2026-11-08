@@ -30,7 +30,13 @@ export interface Step {
   pc: boolean;
   manual_input: boolean;
   money: boolean;
+  /** ボトルネックの印（null でなければボトルネック）。旧データでは見出し */
   issue: string | null;
+  /** 業務の時間がかかっている理由 */
+  issue_time: string;
+  /** ミスの原因 */
+  issue_error: string;
+  /** 旧データの説明（新しい入力では使わない） */
   issue_detail: string;
   third_party: boolean;
   change: ChangeAction | null;

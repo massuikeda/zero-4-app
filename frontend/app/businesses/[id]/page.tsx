@@ -1,13 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMe } from "@/components/AppShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ComparisonView } from "@/components/ComparisonView";
 import { FlowBoard } from "@/components/FlowBoard";
-import { FlowEditor } from "@/components/FlowEditor";
-import { ApiError, api, download } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { normalize } from "@/lib/flow";
 import { HEARING_EXAMPLE, parseHearing } from "@/lib/hearing";
 import { emptyFlow, type Business, type Company, type Flow, type FlowDoc, type FlowKind, type Resource } from "@/lib/types";
@@ -24,6 +23,13 @@ interface Draft {
 
 const fromDoc = (doc: FlowDoc | null): Draft | null =>
   doc ? { data: normalize(doc.data), version: doc.version, dirty: false, doc } : null;
+
+/** 分を「1時間55分」のように表す */
+function fmtMin(m: number) {
+  if (m < 60) return `${m}分`;
+  const h = Math.floor(m / 60);
+  return m % 60 ? `${h}時間${m % 60}分` : `${h}時間`;
+}
 
 export default function BusinessPage() {
   const { id } = useParams<{ id: string }>();
@@ -190,32 +196,42 @@ export default function BusinessPage() {
     }
   };
 
-  const exportDrawio = async (kind: FlowKind) => {
-    const d = drafts[kind];
-    if (!d || !business) return;
-    try {
-      const xml = await api.renderDrawio(d.data, `${business.name} ${LABEL[kind]}`);
-      download(`${business.name}_${LABEL[kind]}.drawio`, xml, "application/xml");
-    } catch (e) {
-      flash("err", e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const exportPng = async (kind: FlowKind) => {
-    if (!boardRef.current || !business) return;
+  /** 図（右側の一覧・集計を含む）を、見出し付きの画像にする */
+  const capture = async (kind: FlowKind) => {
+    if (!boardRef.current) throw new Error("図がありません");
     setExporting(true);
     try {
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const { toPng } = await import("html-to-image");
-      const url = await toPng(boardRef.current, { pixelRatio: 2, backgroundColor: "#ffffff" });
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${business.name}_${LABEL[kind]}.png`;
-      a.click();
-    } catch (e) {
-      flash("err", `画像を作れませんでした：${e instanceof Error ? e.message : e}`);
+      const node = boardRef.current;
+      const url = await toPng(node, { pixelRatio: 2, backgroundColor: "#ffffff" });
+      return { url, w: node.offsetWidth, h: node.offsetHeight };
     } finally {
       setExporting(false);
+    }
+  };
+
+  const fileBase = (kind: FlowKind) => `${business!.name}_${LABEL[kind]}`;
+
+  /** PDFで保存（A4。図の形に合わせて横向き／縦向きを選び、1ページに収める） */
+  const exportPdf = async (kind: FlowKind) => {
+    if (!business) return;
+    try {
+      const { url, w, h } = await capture(kind);
+      const { jsPDF } = await import("jspdf");
+      const landscape = w >= h;
+      const pdf = new jsPDF({ orientation: landscape ? "landscape" : "portrait", unit: "mm", format: "a4" });
+      const pw = pdf.internal.pageSize.getWidth();
+      const ph = pdf.internal.pageSize.getHeight();
+      const margin = 8;
+      const ratio = Math.min((pw - margin * 2) / w, (ph - margin * 2) / h);
+      const iw = w * ratio;
+      const ih = h * ratio;
+      pdf.addImage(url, "PNG", (pw - iw) / 2, margin, iw, ih, undefined, "FAST");
+      pdf.setProperties({ title: `${business.name} ${LABEL[kind]}`, creator: "ミエルMAP" });
+      pdf.save(`${fileBase(kind)}.pdf`);
+    } catch (e) {
+      flash("err", `PDFを作れませんでした：${e instanceof Error ? e.message : e}`);
     }
   };
 
@@ -223,10 +239,15 @@ export default function BusinessPage() {
     return msg ? <div className="alert">{msg.text}</div> : <p className="muted">読み込み中…</p>;
   }
 
+  /** 1件あたりの時間＝各作業の所要時間の合計（作業が無ければ null） */
+  const total = (d: Draft | null) =>
+    d && d.data.steps.length ? d.data.steps.reduce((n, st) => n + (st.minutes || 0), 0) : null;
+  const perCase = { asis: total(drafts.asis), tobe: total(drafts.tobe) };
+
   const tabs: [Tab, string, boolean][] = [
     ["notes", "ヒアリング", notes.dirty],
     ["asis", "AS-IS（現状）", !!drafts.asis?.dirty],
-    ["tobe", "TO-BE（あるべき姿）", !!drafts.tobe?.dirty],
+    ["tobe", "TO-BE（改善後）", !!drafts.tobe?.dirty],
     ["compare", "比較", false],
   ];
 
@@ -276,11 +297,8 @@ export default function BusinessPage() {
             >
               ↶ 元に戻す
             </button>
-            <button className="btn ghost" onClick={() => exportPng(kind)} disabled={d.data.steps.length === 0}>
-              画像で保存
-            </button>
-            <button className="btn ghost" onClick={() => exportDrawio(kind)}>
-              draw.io出力
+            <button className="btn ghost" onClick={() => exportPdf(kind)} disabled={d.data.steps.length === 0}>
+              PDFで保存
             </button>
             {d.dirty && d.doc && (
               <button
@@ -307,32 +325,57 @@ export default function BusinessPage() {
           execView={business.exec_view}
           fieldView={business.field_view}
           exporting={exporting}
+          exportTitle={`${business.name}　${kind === "asis" ? "AS-IS（現状）" : "TO-BE（改善後）"}`}
+          exportSub={`${company.name}　｜　${new Date().toLocaleDateString("ja-JP")} 出力`}
           editable
           onChange={(f, merge) => edit(kind, f, merge)}
         />
-        <details className="table-toggle">
-          <summary>表でまとめて編集する（上級者向け）</summary>
-          <FlowEditor flow={d.data} onChange={(f) => edit(kind, f, true)} resources={resources} isTobe={kind === "tobe"} />
-        </details>
       </div>
     );
   };
 
   return (
     <div className="stack">
-      <nav className="crumbs">
-        {isAdmin && <Link href="/">企業一覧</Link>}
-        {isAdmin && " › "}
-        <Link href={`/companies/${company.id}`}>{company.name}</Link> › {business.name}
-      </nav>
+      <Breadcrumbs
+        items={[
+          ...(isAdmin ? [{ label: "企業一覧", href: "/" }] : []),
+          { label: company.name, href: `/companies/${company.id}` },
+          { label: business.name },
+        ]}
+      />
       <div className="title-row">
         <div>
           <h1>{business.name}</h1>
-          <p className="muted small">
-            {[business.department, business.frequency && `頻度：${business.frequency}`, business.description]
-              .filter(Boolean)
-              .join("　｜　")}
-          </p>
+          <dl className="biz-info">
+            <div>
+              <dt>担当部署</dt>
+              <dd className={business.department ? "" : "empty"}>{business.department || "未入力"}</dd>
+            </div>
+            <div>
+              <dt>頻度</dt>
+              <dd className={business.frequency ? "" : "empty"}>{business.frequency || "未入力"}</dd>
+            </div>
+            <div>
+              <dt>1件あたりの時間</dt>
+              {perCase.asis === null ? (
+                <dd className="empty">AS-IS作成後に表示</dd>
+              ) : (
+                <dd>
+                  {fmtMin(perCase.asis)}
+                  {perCase.tobe !== null && perCase.tobe !== perCase.asis && (
+                    <span className="biz-tobe" title="TO-BE（改善後）">
+                      {" → "}
+                      {fmtMin(perCase.tobe)}
+                    </span>
+                  )}
+                </dd>
+              )}
+            </div>
+            <div className="wide">
+              <dt>何の業務か</dt>
+              <dd className={business.description ? "" : "empty"}>{business.description || "未入力"}</dd>
+            </div>
+          </dl>
         </div>
         {isAdmin && <BusinessInfoEditor business={business} onSaved={setBusiness} />}
       </div>
@@ -364,7 +407,7 @@ export default function BusinessPage() {
                   次の人への渡し方は <code>→メール</code> のように最後に書きます（「メールで送る」などの文でも読み取ります）
                 </li>
                 <li>
-                  困りごとは次の行に <code>※ 見出し／説明</code>。現場が当たり前と思っていた点は <code>※！</code>
+                  困りごとは次の行に <code>※ 時間：時間がかかっている理由／ミス：ミスの原因</code>
                 </li>
                 <li>
                   時間は <code>（15分）</code>、道具や印は <code>［エクセル］［手入力］［¥］</code> でも書けます。<code>#</code> で始まる行はメモとして読み飛ばします
@@ -384,7 +427,7 @@ export default function BusinessPage() {
               className="notes"
               rows={12}
               value={notes.hearing_notes}
-              placeholder={"取引先：注文書を手書きして送る →FAX\n営業部：FAXを見てエクセルに手入力 →メール\n※ 手書きのFAXを見て手入力／読み間違い・入力の手間\n倉庫：ピッキング"}
+              placeholder={"取引先：注文書を手書きして送る →FAX\n営業部：FAXを見てエクセルに手入力 →メール\n※ 時間：1件ずつ手入力している／ミス：読み間違い\n倉庫：ピッキング"}
               onChange={(e) => {
                 setNotes({ ...notes, hearing_notes: e.target.value, dirty: true });
                 setRegenOffer(false);
@@ -487,7 +530,7 @@ function BusinessInfoEditor({ business, onSaved }: { business: Business; onSaved
           <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
         </label>
         <label>
-          部署
+          担当部署
           <input value={f.department} onChange={(e) => setF({ ...f, department: e.target.value })} />
         </label>
         <label>
@@ -495,7 +538,7 @@ function BusinessInfoEditor({ business, onSaved }: { business: Business; onSaved
           <input value={f.frequency} onChange={(e) => setF({ ...f, frequency: e.target.value })} />
         </label>
         <label>
-          概要
+          何の業務か
           <textarea rows={3} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
         </label>
         <button

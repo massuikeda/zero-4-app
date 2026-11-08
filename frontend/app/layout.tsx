@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
+// Noto Sans JP（アプリに同梱。Googleのサーバーには接続しない）
+import "@fontsource-variable/noto-sans-jp";
 import "./globals.css";
 
 export const metadata: Metadata = {

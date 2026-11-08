@@ -2,20 +2,22 @@
 import type { Comparison, Flow, Resource, Step } from "./types";
 
 // ---------------- 道具（色付きの札）の分類 ----------------
-export type ToolKind = "excel" | "handwritten" | "paper" | "fax" | "system" | "other";
+export type ToolKind = "excel" | "word" | "handwritten" | "paper" | "fax" | "system" | "other";
 
 export const TOOL_STYLE: Record<ToolKind, { bar: string; bg: string; fg: string }> = {
-  excel: { bar: "#1f6f43", bg: "#e8f3ec", fg: "#1f6f43" },
+  excel: { bar: "#1f6f43", bg: "#e8f3ec", fg: "#1f6f43" }, // Excel：緑
+  word: { bar: "#1f5fbf", bg: "#e7f0fb", fg: "#1f5fbf" }, // Word：青
   handwritten: { bar: "#b7791f", bg: "#fdf6e9", fg: "#b7791f" },
   paper: { bar: "#7a5230", bg: "#f6efe8", fg: "#6b4526" },
   fax: { bar: "#455a64", bg: "#eceff1", fg: "#37474f" },
-  system: { bar: "#1565c0", bg: "#e7f0fa", fg: "#1565c0" },
+  system: { bar: "#6b7785", bg: "#eff1f4", fg: "#4a5563" }, // 会計システム・受注システムなど：グレー
   other: { bar: "#78909c", bg: "#f2f4f5", fg: "#455a64" },
 };
 
 export function classifyTool(tool: string, resources: Resource[] = []): ToolKind {
   if (!tool) return "other";
   if (/excel|エクセル|xls/i.test(tool)) return "excel";
+  if (/^(word|ワード)|\bword\b|\.docx?$/i.test(tool)) return "word";
   if (/手書き/.test(tool)) return "handwritten";
   if (/fax/i.test(tool)) return "fax";
   if (/紙|伝票|帳票|印刷|書類|注文書/.test(tool)) return "paper";
@@ -23,6 +25,11 @@ export function classifyTool(tool: string, resources: Resource[] = []): ToolKind
   if (r?.kind === "帳票") return "paper";
   if (r?.kind === "システム" || /システム|kintone|sap|クラウド/i.test(tool)) return "system";
   return "other";
+}
+
+/** 札に表示する名前（「エクセル」は「Excel」、「ワード」は「Word」と表示） */
+export function toolLabel(tool: string): string {
+  return tool.replace(/エクセル/g, "Excel").replace(/^ワード$/, "Word");
 }
 
 export const isPaper = (tool: string, resources: Resource[] = []) => {
@@ -42,14 +49,22 @@ export function mediaColor(media: string): string {
 
 // ---------------- 決まった3つの集計 ----------------
 export interface Counters {
-  manual: number; // 手入力・転記の回数
+  manual: number; // 手入力・転記の回数（作業名から自動で判断）
   mail: number; // メール連絡の回数
   paper: number; // 紙を使う箇所
 }
 
+/**
+ * 手入力・転記の作業か（作業名から判断）。
+ * 「入力」「転記」「打ち込み」「書き写す」「作り直す」「加工」などを含み、「自動」を含まないもの
+ */
+export function isManualInput(name: string): boolean {
+  return /入力|転記|打ち込|書き写|作り直|加工|作成し直|書き直/.test(name) && !/自動/.test(name);
+}
+
 export function counters(flow: Flow, resources: Resource[] = []): Counters {
   return {
-    manual: flow.steps.filter((s) => s.manual_input).length,
+    manual: flow.steps.filter((s) => isManualInput(s.name)).length,
     mail: flow.steps.reduce(
       (n, s) => n + s.next.filter((_, i) => /メール/.test(s.next_media[i] ?? "")).length,
       0,
@@ -192,7 +207,7 @@ export function newStep(id: string, lane: string, isTobe: boolean): Step {
   return {
     id, lane, row: null, type: "作業", name: "", tool: "", minutes: 0,
     pc: false, manual_input: false, money: false,
-    issue: null, issue_detail: "", third_party: false,
+    issue: null, issue_time: "", issue_error: "", issue_detail: "", third_party: false,
     change: isTobe ? "新規" : null, note: "",
     next: [], next_media: [], condition_labels: [],
   };

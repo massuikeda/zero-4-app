@@ -50,7 +50,9 @@ def to_drawio(flow: Flow, title: str = "業務フロー") -> str:
         if s.change:
             label = f"【{s.change}】<br>{label}"
         if s.tool:
-            label += f"<br><font style='font-size:10px'>{s.tool}</font>"
+            tool = s.tool.replace("エクセル", "Excel")
+            tool = "Word" if tool == "ワード" else tool
+            label += f"<br><font style='font-size:10px'>{tool}</font>"
         if s.minutes:
             label += f"<br><font style='font-size:10px'>{s.minutes}分</font>"
         tip = "\n".join(x for x in [s.issue and f"課題: {s.issue}", s.note] if x)
@@ -93,9 +95,17 @@ def is_paper(tool: str) -> bool:
     return bool(tool and _PAPER.search(tool))
 
 
+_MANUAL = re.compile(r"入力|転記|打ち込|書き写|作り直|加工|作成し直|書き直")
+
+
+def is_manual_input(name: str) -> bool:
+    """手入力・転記の作業か（作業名から判断。「自動」を含むものは除く）。frontend/lib/flow.ts と同じルール"""
+    return bool(_MANUAL.search(name or "")) and "自動" not in (name or "")
+
+
 def counters(flow: Flow) -> tuple[int, int, int]:
     """決まった3つの集計：手入力・転記の回数、メール連絡の回数、紙を使う箇所"""
-    manual = sum(1 for s in flow.steps if s.manual_input)
+    manual = sum(1 for s in flow.steps if is_manual_input(s.name))
     mail = sum(1 for s in flow.steps for i, _ in enumerate(s.next)
                if i < len(s.next_media) and "メール" in s.next_media[i])
     paper = sum(1 for s in flow.steps if is_paper(s.tool))

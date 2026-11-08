@@ -3,7 +3,7 @@
 /** 図で選んだ作業・矢印の設定パネル（パワポの「書式設定」のような右側の欄） */
 import { useEffect, useRef } from "react";
 import { disconnect, removeStep, updateEdge, updateStep } from "@/lib/edit";
-import { mediaColor } from "@/lib/flow";
+import { mediaColor, toolLabel } from "@/lib/flow";
 import { CHANGE_ACTIONS, CHANGE_COLORS, MEDIA, STEP_TYPES, type Flow, type Resource, type Step, type StepType } from "@/lib/types";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -25,13 +25,15 @@ function Toggle({ on, onClick, children }: { on: boolean; onClick: () => void; c
 }
 
 export function NodeInspector({
-  step, flow, resources, isTobe, focusName, onChange, onClose, onInsertBelow, onSelectEdge,
+  step, flow, resources, isTobe, focusName, onFocused, onChange, onClose, onInsertBelow, onSelectEdge,
 }: {
   step: Step;
   flow: Flow;
   resources: Resource[];
   isTobe: boolean;
-  focusName: number;
+  /** true のときだけ作業名の欄にカーソルを置く（図で作業をダブルクリックしたとき） */
+  focusName: boolean;
+  onFocused: () => void;
   onChange: (f: Flow, merge?: boolean) => void;
   onClose: () => void;
   onInsertBelow: () => void;
@@ -39,11 +41,11 @@ export function NodeInspector({
 }) {
   const nameRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
-    if (focusName > 0) {
-      nameRef.current?.focus();
-      nameRef.current?.select();
-    }
-  }, [focusName]);
+    if (!focusName) return;
+    nameRef.current?.focus();
+    nameRef.current?.select();
+    onFocused();
+  }, [focusName, onFocused]);
 
   const set = (patch: Partial<Step>) => onChange(updateStep(flow, step.id, patch));
   /** 文字入力用（続けて打った分は「元に戻す」1回にまとめる） */
@@ -87,7 +89,7 @@ export function NodeInspector({
           </Toggle>
           {tools.map((t) => (
             <Toggle key={t} on={step.tool === t} onClick={() => set({ tool: step.tool === t ? "" : t })}>
-              {t}
+              {toolLabel(t)}
             </Toggle>
           ))}
         </div>
@@ -102,9 +104,6 @@ export function NodeInspector({
         <div className="insp-chips">
           <Toggle on={step.pc} onClick={() => set({ pc: !step.pc })}>
             画面（PC作業）
-          </Toggle>
-          <Toggle on={step.manual_input} onClick={() => set({ manual_input: !step.manual_input })}>
-            手入力・転記
           </Toggle>
           <Toggle on={step.money} onClick={() => set({ money: !step.money })}>
             ¥ お金の流れ
@@ -130,26 +129,44 @@ export function NodeInspector({
         </Section>
       </div>
 
-      <Section title="ボトルネック（赤丸）">
+      <Section title="ボトルネック（作業名が赤くなる）">
         <Toggle
           on={isBottleneck}
           onClick={() =>
-            set(isBottleneck ? { issue: null, issue_detail: "", third_party: false } : { issue: step.name || "課題" })
+            set(
+              isBottleneck
+                ? { issue: null, issue_time: "", issue_error: "", issue_detail: "", third_party: false }
+                : { issue: "ボトルネック" },
+            )
           }
         >
           ボトルネックにする
         </Toggle>
         {isBottleneck && (
           <>
-            <input placeholder="見出し（例：手書きのFAXを見て手入力）" value={step.issue ?? ""} onChange={(e) => type({ issue: e.target.value })} />
-            <input
-              placeholder="説明（例：読み間違い・入力の手間）"
-              value={step.issue_detail}
-              onChange={(e) => type({ issue_detail: e.target.value })}
-            />
-            <Toggle on={step.third_party} onClick={() => set({ third_party: !step.third_party })}>
-              第三者の気づき
-            </Toggle>
+            <label className="insp-sub">
+              業務の時間がかかっている理由
+              <textarea
+                rows={2}
+                placeholder="例：手書きの文字を読み取りながら1件ずつ入力している"
+                value={step.issue_time}
+                onChange={(e) => type({ issue_time: e.target.value })}
+              />
+            </label>
+            <label className="insp-sub">
+              ミスの原因
+              <textarea
+                rows={2}
+                placeholder="例：手書き文字の読み間違い"
+                value={step.issue_error}
+                onChange={(e) => type({ issue_error: e.target.value })}
+              />
+            </label>
+            {(step.issue_detail || (step.issue && step.issue !== "ボトルネック")) && !step.issue_time && !step.issue_error && (
+              <p className="insp-note">
+                以前の入力：{[step.issue !== "ボトルネック" ? step.issue : "", step.issue_detail].filter(Boolean).join("／")}
+              </p>
+            )}
           </>
         )}
       </Section>

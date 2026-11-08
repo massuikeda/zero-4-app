@@ -7,6 +7,11 @@ const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
+  // 画面はブラウザ側でデータを読み込む作りなので、「即時表示」の自動チェック（開発時の警告）は
+  // 明示的に指定したページだけにする
+  experimental: {
+    instantInsights: { validationLevel: "manual-warning" },
+  },
   turbopack: {
     rules: {
       "*.css": {

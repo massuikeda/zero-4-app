@@ -8,11 +8,13 @@ from .db import Business, Company, FlowDoc, Resource, User
 
 
 def S(id_, lane, name, *, tool="", type_="作業", minutes=10, pc=False, manual=False, money=False,
-      issue=None, detail="", third=False, change=None, note="", nxt=(), media=(), labels=()):
+      time="", error="", third=False, change=None, note="", nxt=(), media=(), labels=()):
     return {
         "id": id_, "lane": lane, "type": type_, "name": name, "tool": tool, "minutes": minutes,
         "pc": pc, "manual_input": manual, "money": money,
-        "issue": issue, "issue_detail": detail, "third_party": third,
+        # ボトルネック：時間がかかる理由／ミスの原因のどちらかがあれば印を付ける
+        "issue": "ボトルネック" if (time or error) else None,
+        "issue_time": time, "issue_error": error, "issue_detail": "", "third_party": third,
         "change": change, "note": note,
         "next": list(nxt), "next_media": list(media), "condition_labels": list(labels),
     }
@@ -22,17 +24,20 @@ ORDER_LANES = ["取引先", "営業部（受注）", "倉庫（出荷）"]
 
 ORDER_ASIS = [
     S("S01", "取引先", "注文書を手書き", tool="手書き", minutes=10, nxt=["S02"], media=["FAX"]),
-    S("S02", "営業部（受注）", "FAXを見て手入力", tool="エクセル", pc=True, manual=True, minutes=15,
-      issue="手書きのFAXを見て手入力", detail="読み間違い・入力の手間", nxt=["S03"], media=["メール"]),
-    S("S03", "倉庫（出荷）", "ピッキングリストを作成（加工）", tool="エクセル", pc=True, manual=True, minutes=20,
-      issue="同じ注文をエクセルで加工し直す", detail="二重入力", nxt=["S04"]),
+    S("S02", "営業部（受注）", "FAXを見て手入力", tool="Excel", pc=True, manual=True, minutes=15,
+      time="手書きの文字を読み取りながら1件ずつ入力している", error="手書き文字の読み間違い",
+      nxt=["S03"], media=["メール"]),
+    S("S03", "倉庫（出荷）", "ピッキングリストを作成（加工）", tool="Excel", pc=True, manual=True, minutes=20,
+      time="営業が入力した注文を、倉庫でもう一度エクセルに作り直している（二重入力）",
+      error="作り直すときの写し間違い", nxt=["S04"]),
     S("S04", "倉庫（出荷）", "ピッキング", minutes=30,
-      issue="部署間の連絡がメール頼み", detail="見落とし・確認待ち", third=True, nxt=["S05", "S06"], media=["メール", ""]),
-    S("S05", "営業部（受注）", "支払い（請求）情報を入力", tool="エクセル", pc=True, manual=True, money=True, minutes=15,
-      issue="支払い情報も別のエクセルに入力", detail="三重入力", third=True),
+      time="部署間の連絡がメール頼みで、確認待ちの時間がある", error="メールの見落とし",
+      third=True, nxt=["S05", "S06"], media=["メール", ""]),
+    S("S05", "営業部（受注）", "支払い（請求）情報を入力", tool="Excel", pc=True, manual=True, money=True, minutes=15,
+      time="同じ情報を請求用の別のエクセルにも入力している（三重入力）", error="金額・数量の転記ミス", third=True),
     S("S06", "倉庫（出荷）", "出荷", minutes=20, nxt=["S07"], media=["配達"]),
     S("S07", "取引先", "受領を確認", tool="紙の伝票", minutes=5,
-      issue="紙の伝票で受領を確認", detail="保管・照合の手間", third=True),
+      time="紙の伝票を保管し、出荷記録と1枚ずつ照合している", error="伝票の紛失・照合漏れ", third=True),
 ]
 
 ORDER_TOBE = [
@@ -61,7 +66,7 @@ def seed(db: Session) -> None:
         "部署": ["営業部（受注）", "倉庫（出荷）", "経理部"],
         "担当者": ["社員", "経理担当", "経理課長"],
         "取引先": ["取引先"],
-        "システム": ["エクセル", "受注システム", "会計システム"],
+        "システム": ["Excel", "Word", "受注システム", "会計システム"],
         "帳票": ["手書き", "紙の伝票", "請求書"],
     }.items():
         for i, n in enumerate(names):
@@ -72,16 +77,16 @@ def seed(db: Session) -> None:
         description="取引先からの注文を受け、出荷して受領を確認するまで",
         hearing_notes="取引先：注文書を手書きして送る →FAX\n"
                       "営業部：FAXを見てエクセルに手入力（15分） →メール\n"
-                      "※ 手書きのFAXを見て手入力／読み間違い・入力の手間\n"
+                      "※ 時間：手書きの文字を読み取りながら1件ずつ入力している／ミス：手書き文字の読み間違い\n"
                       "倉庫：ピッキングリストをエクセルで作り直す（20分）\n"
-                      "※ 同じ注文をエクセルで加工し直す／二重入力\n"
+                      "※ 時間：同じ注文を倉庫でもう一度エクセルに作り直している／ミス：作り直すときの写し間違い\n"
                       "倉庫：ピッキング（30分） →メール\n"
-                      "※！ 部署間の連絡がメール頼み／見落とし・確認待ち\n"
+                      "※ 時間：部署間の連絡がメール頼みで確認待ちがある／ミス：メールの見落とし\n"
                       "営業部：支払い（請求）情報をエクセルに入力（15分）\n"
-                      "※！ 支払い情報も別のエクセルに入力／三重入力\n"
+                      "※ 時間：請求用の別のエクセルにも入力している／ミス：金額・数量の転記ミス\n"
                       "倉庫：出荷（20分） →配達\n"
                       "取引先：紙の伝票で受領を確認（5分）\n"
-                      "※！ 紙の伝票で受領を確認／保管・照合の手間\n"
+                      "※ 時間：紙の伝票を保管し1枚ずつ照合している／ミス：伝票の紛失・照合漏れ\n"
                       "# 注文は月末に集中する",
         exec_view="受注から出荷まで、問題なく回っている",
         field_view="同じ注文を3回入力し、毎日残業で埋めている",
@@ -98,12 +103,12 @@ def seed(db: Session) -> None:
         "lanes": ["経理担当", "経理課長", "取引先"],
         "steps": [
             S("S01", "経理担当", "会計システムに手入力", tool="会計システム", pc=True, manual=True, minutes=30,
-              issue="エクセルからの転記", detail="転記ミスが月10件", nxt=["S02"]),
+              time="エクセルの内容を会計システムに1件ずつ打ち直している", error="転記ミス（月10件程度）", nxt=["S02"]),
             S("S02", "経理担当", "請求書を印刷", tool="請求書", minutes=10, nxt=["S03"]),
             S("S03", "経理課長", "請求書を確認・承認", type_="判断", tool="請求書", minutes=10,
               nxt=["S04", "S01"], labels=["OK", "差戻し"]),
             S("S04", "経理課長", "承認待ち", type_="待ち", minutes=480,
-              issue="課長不在時に承認が止まる", detail="発行が1日以上遅れる", third=True, nxt=["S05"]),
+              time="課長が不在だと承認が止まり、発行が1日以上遅れる", third=True, nxt=["S05"]),
             S("S05", "経理担当", "封入・郵送", tool="請求書", minutes=15, money=True, nxt=["S06"], media=["郵送"]),
             S("S06", "取引先", "請求書を受け取る", tool="請求書", minutes=0),
         ],
@@ -113,9 +118,9 @@ def seed(db: Session) -> None:
         description="社員が立て替えた経費を精算する（AS-ISはまだ。ヒアリングを保存すると自動で作られる見本）",
         hearing_notes="・社員がエクセルの申請書に記入し、領収書と一緒に経理部へ回す\n"
                       "・経理課長が内容を確認して承認する\n"
-                      "※ 課長が不在だと止まる\n"
+                      "※ 時間：課長が不在だと承認が止まる\n"
                       "・経理担当が会計システムに手入力する\n"
-                      "※ 申請書からの転記で入力ミス\n"
+                      "※ 時間：申請書を見ながら打ち直している／ミス：申請書からの転記ミス\n"
                       "・経理担当が月末にまとめて振込\n"
                       "# 領収書の原本は紙で5年保管",
     )
