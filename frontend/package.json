@@ -9,6 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@azure/msal-browser": "^5.29.0",
+    "html-to-image": "^1.11.13",
     "next": "16.4.5",
     "react": "19.3.0",
     "react-dom": "19.3.0"
