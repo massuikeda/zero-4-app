@@ -22,6 +22,8 @@ async function call<T>(path: string, init?: { method?: string; body?: unknown; t
   });
   if (!res.ok) {
     let msg = `エラー (${res.status})`;
+    // 画面側の転送が待ちきれなかったとき（バックエンドの返事が遅い・止まっている）
+    if (res.status === 500 && path.startsWith("/api/")) msg = "サーバーの応答がありませんでした。バックエンドが動いているか確認して、もう一度お試しください (500)";
     try {
       const j = await res.json();
       if (typeof j.detail === "string") msg = j.detail;
@@ -35,9 +37,10 @@ async function call<T>(path: string, init?: { method?: string; body?: unknown; t
 }
 
 type BusinessIn = Pick<Business, "name" | "department" | "frequency" | "description">;
-type NotesIn = Partial<Pick<Business, "hearing_notes" | "exec_view" | "field_view">>;
+type NotesIn = Partial<Pick<Business, "hearing_raw" | "hearing_notes" | "exec_view" | "field_view">>;
 
 export const api = {
+  config: () => call<{ auth_mode: string; ai_enabled: boolean }>("/api/config"),
   devUsers: () => call<UserRow[]>("/api/dev/users"),
   me: () => call<Me>("/api/me"),
 
@@ -61,6 +64,9 @@ export const api = {
   updateBusiness: (id: number, b: BusinessIn) => call<Business>(`/api/businesses/${id}`, { method: "PUT", body: b }),
   updateNotes: (id: number, notes: NotesIn) =>
     call<Business>(`/api/businesses/${id}/notes`, { method: "PUT", body: notes }),
+  /** ヒアリングボックスの記録を Azure OpenAI で決まった形式に整える（保存はしない） */
+  formatHearing: (id: number, raw: string) =>
+    call<{ text: string }>(`/api/businesses/${id}/hearing/format`, { body: { raw } }),
   deleteBusiness: (id: number) => call(`/api/businesses/${id}`, { method: "DELETE" }),
   setAssignees: (id: number, user_ids: number[]) =>
     call<Business>(`/api/businesses/${id}/assignees`, { method: "PUT", body: { user_ids } }),

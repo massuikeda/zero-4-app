@@ -107,6 +107,7 @@ class BusinessOut(_Out):
     department: str
     frequency: str
     description: str
+    hearing_raw: str = ""
     hearing_notes: str
     exec_view: str
     field_view: str
@@ -159,7 +160,8 @@ class BusinessIn(BaseModel):
 class BusinessNotesIn(BaseModel):
     """担当者も編集できる項目（ヒアリング結果）。送った項目だけ更新する"""
 
-    hearing_notes: Optional[str] = None
+    hearing_raw: Optional[str] = None    # ヒアリングボックス（聞いたままの記録）
+    hearing_notes: Optional[str] = None  # 決まった形式
     exec_view: Optional[str] = None   # 経営者の認識
     field_view: Optional[str] = None  # 現場の実態
 
@@ -167,6 +169,14 @@ class BusinessNotesIn(BaseModel):
 class FlowSaveIn(BaseModel):
     data: Flow
     version: int = Field(0, description="読み込んだ時点のversion。新規は0")
+
+
+class HearingFormatIn(BaseModel):
+    raw: str = Field(..., max_length=20000)
+
+
+class HearingFormatOut(BaseModel):
+    text: str
 
 
 class AssignIn(BaseModel):

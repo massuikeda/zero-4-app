@@ -85,6 +85,39 @@ http://localhost:3000 を開きます。初回起動時にデモデータが入�
 
 テストの実行：`pip install -r requirements-dev.txt` → `pytest -q`（backend フォルダで実行）
 
+## Azure OpenAI（ヒアリングからAS-ISを作る）
+
+ヒアリングタブの**ヒアリングボックス**に、現場で聞いた内容をそのまま書く・貼り付けて「AIでAS-ISを作成」を押すと、AS-ISの図ができあがります。
+
+中では次の順に動きます（AIが作るのはテキストだけで、図は決まったルールで作ります）。
+
+1. Azure OpenAI が、記録を下の決まった形式のテキストに直す（`backend/app/ai.py`）
+2. そのテキストを決まったルールで読み取って図にする（`frontend/lib/hearing.ts`）
+3. AS-ISがまだなければそのまま保存。すでにあれば確認のうえ作り直す（保存するまでは「元に戻す」で戻せる）
+
+```
+営業部：FAXを見てエクセルに手入力（15分） →メール
+※ 手書きのFAXを見て手入力／読み間違い・入力の手間     … 現場の人が話した困りごと
+※！ 部署間の連絡がメール頼み／見落とし・確認待ち       … 聞き手（第三者）が気づいた困りごと
+# 注文は月末に集中する                                  … メモ（図には入らない）
+```
+
+AIが作ったテキストは業務の `hearing_notes` に保存されます（画面には出しません）。
+
+**設定**（`backend/.env`。キーはブラウザには渡りません）
+
+| 項目 | 内容 |
+|---|---|
+| `AZURE_OPENAI_ENDPOINT` | Azure ポータル → Azure OpenAI リソース →「キーとエンドポイント」のエンドポイント |
+| `AZURE_OPENAI_API_KEY` | 同じ画面の「キー1」 |
+| `AZURE_OPENAI_DEPLOYMENT` | Azure AI Foundry で作った**デプロイ名**（モデル名ではありません） |
+| `AZURE_OPENAI_API_VERSION` | 省略時 `2024-10-21` |
+
+設定後、`pip install -r requirements.txt`（`openai` パッケージが入ります）→ バックエンドを再起動します。未設定でもアプリは動き、ボタンが押せないだけです。
+
+- AIへの指示（形式のルールと見本）：`backend/app/ai.py` の `SYSTEM_PROMPT`・`EXAMPLE_INPUT`・`EXAMPLE_OUTPUT`
+- API：`POST /api/businesses/{id}/hearing/format`（`{"raw": "…"}` → `{"text": "…"}`。保存はしません）
+
 ## 本番化（Azure）の流れ
 
 1. **DB**：Azure Database for PostgreSQL を作成し、`DATABASE_URL` を設定します（`pip install psycopg[binary]` が必要）。

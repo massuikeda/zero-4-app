@@ -112,6 +112,9 @@ export interface Business {
   department: string;
   frequency: string;
   description: string;
+  /** ヒアリングボックス（聞いたままの記録） */
+  hearing_raw: string;
+  /** 決まった形式（ここからAS-ISを作る） */
   hearing_notes: string;
   exec_view: string;
   field_view: string;

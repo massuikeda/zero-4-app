@@ -8,7 +8,7 @@ import { ComparisonView } from "@/components/ComparisonView";
 import { FlowBoard } from "@/components/FlowBoard";
 import { ApiError, api } from "@/lib/api";
 import { normalize } from "@/lib/flow";
-import { HEARING_EXAMPLE, parseHearing } from "@/lib/hearing";
+import { parseHearing } from "@/lib/hearing";
 import { emptyFlow, type Business, type Company, type Flow, type FlowDoc, type FlowKind, type Resource } from "@/lib/types";
 
 type Tab = "notes" | "asis" | "tobe" | "compare";
@@ -42,7 +42,10 @@ export default function BusinessPage() {
   const [company, setCompany] = useState<Company | null>(null);
   const [resources, setResources] = useState<Resource[]>([]);
   const [drafts, setDrafts] = useState<Record<FlowKind, Draft | null>>({ asis: null, tobe: null });
-  const [notes, setNotes] = useState({ hearing_notes: "", exec_view: "", field_view: "", dirty: false });
+  const [notes, setNotes] = useState({ hearing_raw: "", hearing_notes: "", exec_view: "", field_view: "", dirty: false });
+  // Azure OpenAI（ヒアリングボックス → 決まった形式）
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
   // 元に戻す（Ctrl+Z）用の履歴。連続入力（文字の打鍵など）はまとめて1回分にする
   const history = useRef<Record<FlowKind, { stack: Flow[]; at: number; merge: boolean }>>({
     asis: { stack: [], at: 0, merge: false },
@@ -67,9 +70,10 @@ export default function BusinessPage() {
       setBusiness(b);
       setCompany(c);
       setResources(r);
-      setNotes({ hearing_notes: b.hearing_notes, exec_view: b.exec_view, field_view: b.field_view, dirty: false });
+      setNotes({ hearing_raw: b.hearing_raw, hearing_notes: b.hearing_notes, exec_view: b.exec_view, field_view: b.field_view, dirty: false });
       setDrafts({ asis: fromDoc(f.asis), tobe: fromDoc(f.tobe) });
       if (!f.asis) setTab("notes"); // AS-ISがまだなければ、ヒアリングから始める
+      api.config().then((x) => setAiEnabled(!!x.ai_enabled), () => setAiEnabled(false));
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
     }
@@ -141,29 +145,15 @@ export default function BusinessPage() {
     }
   };
 
-  /** ヒアリングを保存し、AS-ISがまだなければヒアリングからAS-ISを自動で作る */
+  /** ヒアリングボックス・経営者の認識・現場の実態を保存する */
   const saveNotes = async () => {
     setBusy(true);
     try {
-      let b = business!;
-      if (notes.dirty) {
-        const { dirty: _d, ...body } = notes;
-        b = await api.updateNotes(bid, body);
-        setBusiness(b);
-        setNotes({ hearing_notes: b.hearing_notes, exec_view: b.exec_view, field_view: b.field_view, dirty: false });
-      }
-      const parsed = parseHearing(b.hearing_notes, resources);
-      if (parsed.stepCount === 0) {
-        flash("ok", "ヒアリング内容を保存しました");
-      } else if (!drafts.asis) {
-        const doc = await api.saveFlow(bid, "asis", parsed.flow, 0);
-        setDrafts((x) => ({ ...x, asis: fromDoc(doc) }));
-        setTab("asis");
-        flash("ok", `ヒアリングからAS-ISを作成しました（作業${parsed.stepCount}件）。図の上でそのまま直せます`);
-      } else {
-        setRegenOffer(true);
-        flash("ok", "ヒアリング内容を保存しました");
-      }
+      const { dirty: _d, ...body } = notes;
+      const b = await api.updateNotes(bid, body);
+      setBusiness(b);
+      setNotes({ hearing_raw: b.hearing_raw, hearing_notes: b.hearing_notes, exec_view: b.exec_view, field_view: b.field_view, dirty: false });
+      flash("ok", "ヒアリング内容を保存しました");
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
     } finally {
@@ -171,12 +161,38 @@ export default function BusinessPage() {
     }
   };
 
-  const regenerateAsis = () => {
-    const parsed = parseHearing(notes.hearing_notes, resources);
-    edit("asis", parsed.flow);
+  /**
+   * AIでAS-ISを作る：ヒアリングボックス → Azure OpenAI で決まった形式のテキスト → 決まったルールで図にする。
+   * AS-ISがまだなければそのまま保存、すでにあれば作り直し（保存前の下書き。「元に戻す」で戻せる）
+   */
+  const createAsisWithAi = async () => {
+    if (!notes.hearing_raw.trim()) return flash("err", "ヒアリングボックスに記録を書いてください");
     setRegenOffer(false);
-    setTab("asis");
-    flash("ok", "ヒアリングからAS-ISを作り直しました。確認して「保存」すると確定します（「元に戻す」で前の状態に戻せます）");
+    setAiBusy(true);
+    try {
+      const { text } = await api.formatHearing(bid, notes.hearing_raw);
+      const parsed = parseHearing(text, resources);
+      if (parsed.stepCount === 0) throw new Error("AIの結果から作業を読み取れませんでした。ヒアリングボックスの内容を見直してください");
+      // 記録と、AIが整えたテキスト（図の元）も保存しておく
+      const { dirty: _d, ...body } = notes;
+      const b = await api.updateNotes(bid, { ...body, hearing_notes: text });
+      setBusiness(b);
+      setNotes({ hearing_raw: b.hearing_raw, hearing_notes: b.hearing_notes, exec_view: b.exec_view, field_view: b.field_view, dirty: false });
+      const counts = `作業${parsed.stepCount}件・ボトルネック${parsed.bottleneckCount}件`;
+      if (!drafts.asis) {
+        const doc = await api.saveFlow(bid, "asis", parsed.flow, 0);
+        setDrafts((x) => ({ ...x, asis: fromDoc(doc) }));
+        flash("ok", `AIでAS-ISを作成しました（${counts}）。図の上でそのまま直せます`);
+      } else {
+        edit("asis", parsed.flow);
+        flash("ok", `AIでAS-ISを作り直しました（${counts}）。確認して「保存」すると確定します（「元に戻す」で前の状態に戻せます）`);
+      }
+      setTab("asis");
+    } catch (e) {
+      flash("err", e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiBusy(false);
+    }
   };
 
   const startTobe = async (fromAsis: boolean) => {
@@ -394,46 +410,24 @@ export default function BusinessPage() {
       <section className="panel">
         {tab === "notes" && (
           <div className="stack">
-            <p className="muted small">
-              現場でのヒアリング内容を、<b>1行に1つの作業</b>で書きます。保存すると、AS-ISの図が自動でできあがります。
-            </p>
-            <details className="hearing-guide">
-              <summary>書き方のコツと例</summary>
-              <ul>
-                <li>
-                  <b>担当：作業</b> の形で書くと確実です（例：<code>営業部：FAXを見てエクセルに手入力</code>）。「営業部がFAXを見て…」のような普通の文でも読み取ります
-                </li>
-                <li>
-                  次の人への渡し方は <code>→メール</code> のように最後に書きます（「メールで送る」などの文でも読み取ります）
-                </li>
-                <li>
-                  困りごとは次の行に <code>※ 時間：時間がかかっている理由／ミス：ミスの原因</code>
-                </li>
-                <li>
-                  時間は <code>（15分）</code>、道具や印は <code>［エクセル］［手入力］［¥］</code> でも書けます。<code>#</code> で始まる行はメモとして読み飛ばします
-                </li>
-              </ul>
-              <pre>{HEARING_EXAMPLE}</pre>
-              {!notes.hearing_notes.trim() && (
-                <button
-                  className="btn ghost"
-                  onClick={() => setNotes({ ...notes, hearing_notes: HEARING_EXAMPLE, dirty: true })}
-                >
-                  この例を入れてみる
-                </button>
-              )}
-            </details>
-            <textarea
-              className="notes"
-              rows={12}
-              value={notes.hearing_notes}
-              placeholder={"取引先：注文書を手書きして送る →FAX\n営業部：FAXを見てエクセルに手入力 →メール\n※ 時間：1件ずつ手入力している／ミス：読み間違い\n倉庫：ピッキング"}
-              onChange={(e) => {
-                setNotes({ ...notes, hearing_notes: e.target.value, dirty: true });
-                setRegenOffer(false);
-              }}
-            />
-            <HearingPreview text={notes.hearing_notes} resources={resources} />
+            <div className="hearing-box">
+              <div className="hearing-head">
+                <div>
+                  <h3>ヒアリングボックス</h3>
+                  <p>現場で聞いた内容を、そのまま書く・貼り付けます（話し言葉・箇条書きのままでOK）。「AIでAS-ISを作成」を押すと、AS-ISの図ができあがります。</p>
+                </div>
+              </div>
+              <textarea
+                className="notes"
+                rows={14}
+                value={notes.hearing_raw}
+                placeholder={"例：取引先は注文書を手書きしてFAXで送ってくる。営業はFAXを見ながらエクセルに入力していて1件15分くらい。字が読みにくくて読み間違えることがある。終わったらメールで倉庫に伝える…"}
+                onChange={(e) => {
+                  setNotes({ ...notes, hearing_raw: e.target.value, dirty: true });
+                  setRegenOffer(false);
+                }}
+              />
+            </div>
             <p className="muted small">AS-ISの図の右下に表示されます。</p>
             <div className="views-grid">
               <label className="exec">
@@ -457,41 +451,43 @@ export default function BusinessPage() {
             </div>
             {regenOffer && (
               <div className="regen">
-                <span>AS-ISはすでにあります。このヒアリング内容でAS-ISを作り直しますか？</span>
+                <span>AS-ISはすでにあります。ヒアリングボックスの内容で、AIでAS-ISを作り直しますか？（保存するまでは「元に戻す」で戻せます）</span>
                 <div className="row gap">
                   <button className="btn ghost" onClick={() => setRegenOffer(false)}>
                     今のAS-ISのままにする
                   </button>
-                  <button className="btn primary" onClick={regenerateAsis}>
-                    AS-ISを作り直す
+                  <button className="btn primary" onClick={createAsisWithAi}>
+                    AIで作り直す
                   </button>
                 </div>
               </div>
             )}
-            <div className="row end">
-              {drafts.asis ? (
-                <button className="btn primary" disabled={!notes.dirty || busy} onClick={saveNotes}>
-                  保存
-                </button>
-              ) : (
-                <button
-                  className="btn primary"
-                  disabled={busy || (!notes.dirty && !notes.hearing_notes.trim())}
-                  onClick={saveNotes}
-                >
-                  保存してAS-ISを作成
-                </button>
+            <div className="row end gap hearing-actions">
+              {!aiEnabled && (
+                <span className="muted small">
+                  Azure OpenAI が未設定です（backend/.env の AZURE_OPENAI_…を設定すると使えます）
+                </span>
               )}
+              <button className="btn ghost" disabled={!notes.dirty || busy || aiBusy} onClick={saveNotes}>
+                保存
+              </button>
+              <button
+                className="btn primary"
+                disabled={!aiEnabled || aiBusy || busy || !notes.hearing_raw.trim()}
+                onClick={() => (drafts.asis ? setRegenOffer(true) : createAsisWithAi())}
+              >
+                {aiBusy ? "AIがAS-ISを作成しています…（1分ほどかかることがあります）" : drafts.asis ? "AIでAS-ISを作り直す" : "AIでAS-ISを作成"}
+              </button>
             </div>
           </div>
         )}
         {tab === "asis" && (
           <div className="split">
             {renderFlowTab("asis")}
-            {business.hearing_notes && drafts.asis && (
+            {(business.hearing_raw || business.hearing_notes) && drafts.asis && (
               <details className="side-notes">
-                <summary>ヒアリングメモを見ながら入力</summary>
-                <pre>{business.hearing_notes}</pre>
+                <summary>ヒアリングを見ながら入力</summary>
+                <pre>{business.hearing_raw || business.hearing_notes}</pre>
               </details>
             )}
           </div>
@@ -556,23 +552,5 @@ function BusinessInfoEditor({ business, onSaved }: { business: Business; onSaved
         </button>
       </div>
     </details>
-  );
-}
-
-/** ヒアリングメモから何を読み取れるかを、その場で見せる */
-function HearingPreview({ text, resources }: { text: string; resources: Resource[] }) {
-  if (!text.trim()) return null;
-  const p = parseHearing(text, resources);
-  if (p.stepCount === 0) return <p className="muted small">作業として読み取れる行がまだありません。</p>;
-  return (
-    <p className="hearing-preview">
-      このメモから <b>作業{p.stepCount}件</b>・<b>列{p.flow.lanes.length}つ</b>（{p.flow.lanes.join("、")}）
-      {p.bottleneckCount > 0 && (
-        <>
-          ・<b>ボトルネック{p.bottleneckCount}件</b>
-        </>
-      )}
-      を読み取れます
-    </p>
   );
 }

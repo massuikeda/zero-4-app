@@ -81,7 +81,8 @@ class Business(Base):
     department: Mapped[str] = mapped_column(String(200), default="")
     frequency: Mapped[str] = mapped_column(String(100), default="")
     description: Mapped[str] = mapped_column(Text, default="")
-    hearing_notes: Mapped[str] = mapped_column(Text, default="")
+    hearing_raw: Mapped[str] = mapped_column(Text, default="")    # ヒアリングボックス（聞いたままの記録）
+    hearing_notes: Mapped[str] = mapped_column(Text, default="")  # 決まった形式（ここからAS-ISを作る）
     exec_view: Mapped[str] = mapped_column(Text, default="")   # 経営者の認識
     field_view: Mapped[str] = mapped_column(Text, default="")  # 現場の実態
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
@@ -129,5 +130,16 @@ def get_db():
         db.close()
 
 
+# あとから増やした列（既存のDBには無いので、起動時に足す）
+_ADDED_COLUMNS = [("businesses", "hearing_raw", "TEXT NOT NULL DEFAULT ''")]
+
+
 def init_db():
     Base.metadata.create_all(engine)
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table, col, ddl in _ADDED_COLUMNS:
+            if col not in {c["name"] for c in insp.get_columns(table)}:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))

@@ -11,6 +11,9 @@ const nextConfig: NextConfig = {
   // 明示的に指定したページだけにする
   experimental: {
     instantInsights: { validationLevel: "manual-warning" },
+    // /api/* をバックエンドへ転送するときの待ち時間（既定は30秒）。
+    // AIでAS-ISを作るときは1分以上かかることがあるので、3分まで待つ
+    proxyTimeout: 180_000,
   },
   turbopack: {
     rules: {

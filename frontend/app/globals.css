@@ -513,3 +513,10 @@ tr.has-issue td:first-child { box-shadow: inset 3px 0 var(--danger); }
 }
 .biz-info .biz-tobe { color: #2e7d32; }
 @media (max-width: 760px) { .biz-info > div:nth-child(3) { border-left: 0; border-top: 1px solid #d3d8de; grid-column: 1 / -1; } }
+
+/* ===== ヒアリングボックス ===== */
+.hearing-box { display: flex; flex-direction: column; gap: 10px; background: #f4f6f8; border: 1px solid #d9dee4; border-radius: 10px; padding: 14px; min-width: 0; }
+.hearing-head h3 { margin: 0; font-size: 17px; color: #0d2340; }
+.hearing-head p { margin: 2px 0 0; font-size: 13px; color: #5b6573; line-height: 1.6; }
+.hearing-box .notes { background: #fff; }
+.hearing-actions { align-items: center; }

@@ -8,13 +8,13 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import render
+from . import ai, render
 from .auth import can_see_company, current_user, get_business_or_404, require_admin
 from .config import settings
 from .db import Business, Company, FlowDoc, Resource, SessionLocal, User, get_db, init_db, now
 from .schemas import (
     AssignIn, BusinessIn, BusinessNotesIn, BusinessOut, CompanyIn, CompanyOut, Flow, FlowDocOut, FlowKind,
-    FlowSaveIn, FlowsOut, Me, RenderIn, ResourceIn, ResourceOut, UserIn, UserOut,
+    FlowSaveIn, FlowsOut, HearingFormatIn, HearingFormatOut, Me, RenderIn, ResourceIn, ResourceOut, UserIn, UserOut,
 )
 
 
@@ -67,7 +67,7 @@ def health():
 
 @app.get("/api/config")
 def config():
-    return {"auth_mode": settings.auth_mode}
+    return {"auth_mode": settings.auth_mode, "ai_enabled": ai.enabled()}
 
 
 @app.get("/api/dev/users", response_model=list[UserOut])
@@ -208,6 +208,20 @@ def update_notes(bid: int, body: BusinessNotesIn, user: User = Depends(current_u
     b.updated_at = now()
     db.commit()
     return _business_out(b, user)
+
+
+@app.post("/api/businesses/{bid}/hearing/format", response_model=HearingFormatOut)
+def format_hearing(bid: int, body: HearingFormatIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """ヒアリングボックスの記録を、Azure OpenAI で「AS-ISの形式」に整える（保存はしない。画面で確認してから保存）"""
+    b = get_business_or_404(db, user, bid)
+    rs = db.scalars(select(Resource).where(Resource.company_id == b.company_id).order_by(Resource.sort, Resource.id)).all()
+    lanes = [r.name for r in rs if r.kind in ("部署", "担当者", "取引先")]
+    tools = [r.name for r in rs if r.kind in ("システム", "帳票")]
+    try:
+        text = ai.format_hearing(body.raw, b.name, lanes, tools)
+    except ai.AIError as e:
+        raise HTTPException(e.status, str(e)) from e
+    return HearingFormatOut(text=text)
 
 
 @app.delete("/api/businesses/{bid}")

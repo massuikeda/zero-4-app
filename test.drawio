@@ -1,0 +1,228 @@
+<mxfile host="65bd71144e">
+    <diagram id="-Y3RfHGM9Smi5xgBNs35" name="ページ-1">
+        <mxGraphModel dx="2034" dy="1246" grid="1" gridSize="9" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="" vertex="1">
+                    <mxGeometry height="364" width="676" x="113" y="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-15" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;" value="Key Vault&lt;div&gt;（APIキー保管）&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="64" width="120" x="359" y="360" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-1" parent="1" style="image;sketch=0;aspect=fixed;html=1;align=center;fontSize=12;image=img/lib/mscae/App_Services.svg;points=[[0.501,0,0],[0.501,1,0],[0,0.499,0],[1,0.5,0],[0.837,0.128,0],[0.87,0.842,0],[0.113,0.825,0],[0.148,0.143,0]];" value="" vertex="1">
+                    <mxGeometry height="50" width="50" x="260" y="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-3" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="App Service" vertex="1">
+                    <mxGeometry height="30" width="120" x="225" y="190" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-4" parent="1" style="image;sketch=0;aspect=fixed;html=1;align=center;fontSize=12;image=img/lib/mscae/App_Services.svg;points=[[0.501,0,0],[0.501,1,0],[0,0.499,0],[1,0.5,0],[0.837,0.128,0],[0.87,0.842,0],[0.113,0.825,0],[0.148,0.143,0]];" value="" vertex="1">
+                    <mxGeometry height="50" width="50" x="394" y="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-5" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;" value="App Service" vertex="1">
+                    <mxGeometry height="30" width="120" x="359" y="190" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-6" parent="1" style="image;aspect=fixed;html=1;align=center;fontSize=12;image=img/lib/azure2/databases/Azure_Database_MySQL_Server.svg;points=[[0.5,0.003,0],[0.502,0.998,0],[0,0.499,0],[1,0.499,0],[0.976,0.093,0],[0.983,0.9,0],[0.017,0.9,0],[0.014,0.103,0]];" value="" vertex="1">
+                    <mxGeometry height="64" width="48" x="686" y="133" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-7" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;" value="MySQL" vertex="1">
+                    <mxGeometry height="30" width="120" x="650" y="200" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-8" parent="1" style="whiteSpace=wrap;html=1;" value="閉域網" vertex="1">
+                    <mxGeometry height="30" width="120" x="324" y="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-9" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;" value="BE" vertex="1">
+                    <mxGeometry height="30" width="79" x="379.5" y="105" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-10" edge="1" parent="1" source="1jMp2kxtp0SUoU5thPLP-1" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.499;entryDx=0;entryDy=0;entryPerimeter=0;" target="1jMp2kxtp0SUoU5thPLP-4" value="">
+                    <mxGeometry height="50" relative="1" width="50" as="geometry">
+                        <mxPoint x="420" y="300" as="sourcePoint"/>
+                        <mxPoint x="470" y="250" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-11" edge="1" parent="1" source="1jMp2kxtp0SUoU5thPLP-4" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.499;entryDx=0;entryDy=0;entryPerimeter=0;" target="1jMp2kxtp0SUoU5thPLP-6" value="">
+                    <mxGeometry height="50" relative="1" width="50" as="geometry">
+                        <mxPoint x="492" y="160" as="sourcePoint"/>
+                        <mxPoint x="636" y="160" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-12" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="プライベート&lt;div&gt;エンドポイント&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="50" width="96" x="662" y="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-13" parent="1" style="whiteSpace=wrap;html=1;" value="外部API" vertex="1">
+                    <mxGeometry height="38" width="120" x="578" y="450" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-14" parent="1" style="image;aspect=fixed;html=1;align=center;fontSize=12;image=img/lib/azure2/security/Key_Vaults.svg;points=[[0.5,0,0],[0.5,1,0],[0,0.5,0],[1,0.501,0],[0.855,0.145,0],[0.865,0.845,0],[0.135,0.845,0],[0.148,0.143,0]];" value="" vertex="1">
+                    <mxGeometry height="50" width="50" x="394" y="327" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-18" parent="1" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" value="Actor" vertex="1">
+                    <mxGeometry height="60" width="30" x="-162" y="137" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-20" parent="1" style="image;aspect=fixed;html=1;align=center;fontSize=12;image=img/lib/azure2/networking/Application_Gateways.svg;points=[[0.5,0,0],[0.5,1,0],[0,0.5,0],[1,0.5,0],[0.758,0.242,0],[0.758,0.758,0],[0.242,0.758,0],[0.242,0.242,0]];" value="" vertex="1">
+                    <mxGeometry height="64" width="64" x="81" y="133" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-23" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="Application GateWay" vertex="1">
+                    <mxGeometry height="30" width="120" x="53" y="190" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-26" edge="1" parent="1" source="1jMp2kxtp0SUoU5thPLP-20" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.499;entryDx=0;entryDy=0;entryPerimeter=0;" target="1jMp2kxtp0SUoU5thPLP-1" value="">
+                    <mxGeometry height="50" relative="1" width="50" as="geometry">
+                        <mxPoint x="180" y="174" as="sourcePoint"/>
+                        <mxPoint x="264" y="174" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-27" edge="1" parent="1" source="1jMp2kxtp0SUoU5thPLP-5" style="endArrow=classic;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" target="1jMp2kxtp0SUoU5thPLP-14" value="">
+                    <mxGeometry height="50" relative="1" width="50" as="geometry">
+                        <mxPoint x="383" y="320" as="sourcePoint"/>
+                        <mxPoint x="467" y="320" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-28" edge="1" parent="1" source="1jMp2kxtp0SUoU5thPLP-4" style="edgeStyle=segmentEdgeStyle;endArrow=classic;html=1;curved=0;rounded=0;endSize=8;startSize=8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;exitPerimeter=0;" target="1jMp2kxtp0SUoU5thPLP-31" value="">
+                    <mxGeometry height="50" relative="1" width="50" x="0.0961" as="geometry">
+                        <mxPoint x="558" y="200" as="sourcePoint"/>
+                        <mxPoint x="752" y="362" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-29" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;" value="FE" vertex="1">
+                    <mxGeometry height="30" width="79" x="245" y="105" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-31" parent="1" style="image;aspect=fixed;html=1;align=center;fontSize=12;image=img/lib/azure2/networking/NAT.svg;points=[[0.5,0,0],[0.5,1,0],[0,0.5,0],[1,0.5,0],[0.758,0.242,0],[0.758,0.758,0],[0.242,0.758,0],[0.242,0.242,0]];" value="" vertex="1">
+                    <mxGeometry height="68" width="68" x="604" y="327" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-32" edge="1" parent="1" source="1jMp2kxtp0SUoU5thPLP-31" style="endArrow=classic;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitPerimeter=0;" target="1jMp2kxtp0SUoU5thPLP-13" value="">
+                    <mxGeometry height="50" relative="1" width="50" as="geometry">
+                        <mxPoint x="637.5" y="405" as="sourcePoint"/>
+                        <mxPoint x="637.5" y="512" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-33" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="NAT" vertex="1">
+                    <mxGeometry height="30" width="64" x="666" y="346" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-34" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="プライベート&lt;div&gt;エンドポイント&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="50" width="96" x="310" y="277" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-35" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="パブリックIPアドレス" vertex="1">
+                    <mxGeometry height="30" width="162" x="33" y="87.3" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-37" parent="1" style="image;aspect=fixed;html=1;align=center;fontSize=12;image=img/lib/azure2/networking/Web_Application_Firewall_Policies_WAF.svg;points=[[0.477,0.003,0],[0.5,0.998,0],[0,0.486,0],[0.965,0.5,0],[0.802,0.123,0],[0.992,0.99,0],[0.268,0.99,0],[0.15,0.133,0]];" value="" vertex="1">
+                    <mxGeometry height="38" width="38" x="36" y="122" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-39" parent="1" style="whiteSpace=wrap;html=1;" value="&lt;table&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;SQL インジェクション&lt;/td&gt;&lt;td&gt;入力欄に SQL 文を混ぜて、DB の中身を盗んだり書き換えたりする&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;クロスサイト スクリプティング（XSS）&lt;/td&gt;&lt;td&gt;画面に悪意のあるスクリプトを仕込み、ほかの利用者の情報を盗む&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;コマンド インジェクション&lt;/td&gt;&lt;td&gt;サーバー上で勝手にコマンドを実行させる&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;パス トラバーサル&lt;/td&gt;&lt;td&gt;見せるはずのないファイルを読み出す&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;不正なリクエスト&lt;/td&gt;&lt;td&gt;HTTP の決まりを破った、怪しい形式の通信&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;" vertex="1">
+                    <mxGeometry height="150" width="505.5" x="-225" y="468" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-41" edge="1" parent="1" source="1jMp2kxtp0SUoU5thPLP-18" style="endArrow=classic;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" target="1jMp2kxtp0SUoU5thPLP-20" value="">
+                    <mxGeometry height="50" relative="1" width="50" x="-0.1831" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="18" y="165"/>
+                        </Array>
+                        <mxPoint x="-69" y="165" as="sourcePoint"/>
+                        <mxPoint x="81" y="165" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-42" parent="1" style="whiteSpace=wrap;html=1;" value="WAFによる効果" vertex="1">
+                    <mxGeometry height="30" width="120" x="-225" y="432" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-43" parent="1" style="aspect=fixed;html=1;align=center;shadow=0;dashed=0;fillColor=#FF6A00;strokeColor=none;shape=mxgraph.alibaba_cloud.ddos_protection;" value="" vertex="1">
+                    <mxGeometry height="47.400000000000006" width="41.4" x="32.599999999999994" y="35" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-44" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="DDoS IP Protection" vertex="1">
+                    <mxGeometry height="19.4" width="120" x="9" y="228" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-46" parent="1" style="whiteSpace=wrap;html=1;" value="大量の通信で&lt;strong&gt;回線やサーバーを埋め尽くす&lt;/strong&gt;攻撃を防ぐ" vertex="1">
+                    <mxGeometry height="50" width="505.5" x="-225" y="675" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-47" parent="1" style="whiteSpace=wrap;html=1;" value="&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;DDoS IP Protectionによる効果&lt;/span&gt;" vertex="1">
+                    <mxGeometry height="30" width="171" x="-225" y="639" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-49" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="マネージドID" vertex="1">
+                    <mxGeometry height="30" width="96" x="504" y="130" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-50" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="マネージドID" vertex="1">
+                    <mxGeometry height="30" width="96" x="371" y="247.4" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-51" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="プライベート&lt;div&gt;エンドポイント&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="50" width="96" x="371" y="67.3" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-52" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="プライベート&lt;div&gt;エンドポイント&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="50" width="96" x="236.5" y="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-54" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="WAF" vertex="1">
+                    <mxGeometry height="19.4" width="48" x="33" y="170.6" as="geometry"/>
+                </mxCell>
+                <mxCell id="1jMp2kxtp0SUoU5thPLP-55" parent="1" style="whiteSpace=wrap;html=1;" value="BtoC向けのサービスを想定する" vertex="1">
+                    <mxGeometry height="30" width="120" x="-216" y="9" as="geometry"/>
+                </mxCell>
+                <mxCell id="tT23Pw1_n6F1nkaaqQ0y-1" parent="1" style="whiteSpace=wrap;html=1;align=left;" value="&lt;ul&gt;&lt;li&gt;なぜAzure？&lt;/li&gt;&lt;li&gt;なぜApplicationGateWay&lt;/li&gt;&lt;li&gt;App Service&lt;/li&gt;&lt;li&gt;マネージドID使う理由は？&lt;/li&gt;&lt;li&gt;NAT&lt;/li&gt;&lt;li&gt;リスク対策。&lt;/li&gt;&lt;/ul&gt;" vertex="1">
+                    <mxGeometry height="188" width="338" x="432" y="585" as="geometry"/>
+                </mxCell>
+                <mxCell id="tT23Pw1_n6F1nkaaqQ0y-4" parent="1" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" value="Actor" vertex="1">
+                    <mxGeometry height="60" width="30" x="-105" y="327" as="geometry"/>
+                </mxCell>
+                <mxCell id="tT23Pw1_n6F1nkaaqQ0y-5" parent="1" style="shape=actor;whiteSpace=wrap;html=1;" value="" vertex="1">
+                    <mxGeometry height="60" width="40" x="-189" y="342" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="" vertex="1">
+                    <mxGeometry height="364" width="369" x="918" y="247.4" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-2" parent="1" style="whiteSpace=wrap;html=1;" value="閉域網" vertex="1">
+                    <mxGeometry height="30" width="120" x="1071" y="207" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-3" parent="1" style="image;sketch=0;aspect=fixed;html=1;align=center;fontSize=12;image=img/lib/mscae/App_Services.svg;points=[[0.501,0,0],[0.501,1,0],[0,0.499,0],[1,0.5,0],[0.837,0.128,0],[0.87,0.842,0],[0.113,0.825,0],[0.148,0.143,0]];" value="" vertex="1">
+                    <mxGeometry height="50" width="50" x="1071" y="400" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-4" edge="1" parent="1" source="1jMp2kxtp0SUoU5thPLP-2" style="edgeStyle=segmentEdgeStyle;endArrow=classic;html=1;curved=0;rounded=0;endSize=8;startSize=8;exitX=1;exitY=0.543;exitDx=0;exitDy=0;exitPerimeter=0;" target="kuCgR6Ss1DJAD7ms6acd-1" value="">
+                    <mxGeometry height="50" relative="1" width="50" x="-0.2954" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="789" y="261"/>
+                            <mxPoint x="846" y="261"/>
+                            <mxPoint x="846" y="441"/>
+                        </Array>
+                        <mxPoint x="488" y="214" as="sourcePoint"/>
+                        <mxPoint x="647" y="336" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-5" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="VPN" vertex="1">
+                    <mxGeometry height="50" width="96" x="801" y="310" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-6" parent="1" style="whiteSpace=wrap;html=1;" value="銀行口座作成API" vertex="1">
+                    <mxGeometry height="30" width="120" x="798" y="277" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-7" parent="1" style="whiteSpace=wrap;html=1;" value="福岡銀行社内" vertex="1">
+                    <mxGeometry height="30" width="120" x="1071" y="150" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-8" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="IP制限" vertex="1">
+                    <mxGeometry height="30" width="96" x="837" y="454" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-11" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="どこにどんな情報が入っているか&lt;div&gt;どこにリスクがあるか？&lt;/div&gt;&lt;div&gt;どこにとられちゃいけないか&lt;/div&gt;&lt;div&gt;そこにつながる経路ってどこですか？&lt;/div&gt;&lt;div&gt;ＩＴ監査で使う。&lt;/div&gt;&lt;div&gt;機密情報&lt;/div&gt;&lt;div&gt;だれがいつどんなリクエストを送って&lt;/div&gt;&lt;div&gt;どんなものを返却したか&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="235" x="864" y="-97.69999999999999" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-12" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="ネットワーク&lt;div&gt;経路ふさがれているかをテスト&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="235" x="873" y="488.00000000000006" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-13" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="規模と&lt;div&gt;画像とか&lt;/div&gt;&lt;div&gt;ALB1（ロードバランサー）&lt;/div&gt;&lt;div&gt;ＡＰＰＧＷ&lt;/div&gt;&lt;div&gt;レイヤーが違&lt;/div&gt;&lt;div&gt;ＡＰＰＧＷでロードバランサー&lt;/div&gt;&lt;div&gt;チームで作成する。&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="110.8" width="183" x="113" y="-90.8" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-14" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="ログどうする？&lt;div&gt;Azure のログ&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;MySQL クエリのログをとる。&lt;/div&gt;&lt;div&gt;ログアナリティクスもいれる&lt;/div&gt;&lt;div&gt;全部とる&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="110.8" width="183" x="578" y="-90.8" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-15" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="audid（監査）ログ&lt;div&gt;Ipアドレスで確認する&lt;/div&gt;&lt;div&gt;アクセスログ&lt;/div&gt;&lt;div&gt;だれがいつアクセスしたか&lt;/div&gt;&lt;div&gt;MySQL&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="110.8" width="183" x="686" y="-252" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-16" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="ログアナリティクスは全体をみる&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;利用者のログ&lt;/div&gt;&lt;div&gt;Azure Monitor&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;非構造のデータ（JSON）&lt;/div&gt;&lt;div&gt;利用者ユーザＩＤ&lt;/div&gt;&lt;div&gt;App Insight コスモスＥＢ&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="132.8" width="183" x="359" y="432" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-19" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="ログインしたときの経路&lt;div&gt;どこの通信の経路通るんだっけ？&lt;/div&gt;&lt;div&gt;ユースケースごとに通信経路を出す。&lt;/div&gt;&lt;div&gt;どこにリスクがあるのか？&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;負荷分散ってどうなんだっけ？&lt;/div&gt;&lt;div&gt;認証とか認可&lt;/div&gt;&lt;div&gt;個人情報もちたくない&lt;/div&gt;&lt;div&gt;責任はGoogle管理になる。&lt;/div&gt;&lt;div&gt;外部にでるからそこの通信どうなるの？&lt;/div&gt;&lt;div&gt;MySQLでいいの？Oracle、Postgerres&lt;br&gt;&lt;/div&gt;&lt;div&gt;大量データ移行が発生したときに困る&lt;/div&gt;&lt;div&gt;機能が弱い。&lt;/div&gt;&lt;div&gt;DB早くなるコマンドがない。&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="216" width="330.5" x="335.5" y="-324" as="geometry"/>
+                </mxCell>
+                <mxCell id="kuCgR6Ss1DJAD7ms6acd-20" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="2分で発表してほしい。&lt;div&gt;ガッチガチの構成にする&lt;/div&gt;&lt;div&gt;エンタープライズ&lt;/div&gt;&lt;div&gt;アーキテクチャを解説する。&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="235" x="978.5" y="-351" as="geometry"/>
+                </mxCell>
+                <mxCell id="mUUGoLEJH7iy7C9W25tK-1" parent="1" style="image;aspect=fixed;html=1;align=center;fontSize=12;image=img/lib/azure2/networking/Front_Doors.svg;points=[[0.514,0,0],[0.504,1,0],[0,0.507,0],[1,0.554,0],[0.707,0.077,0],[0.932,0.733,0],[0.09,0.728,0],[0.085,0.292,0]];" value="" vertex="1">
+                    <mxGeometry height="60" width="68" x="-81" y="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="mUUGoLEJH7iy7C9W25tK-2" parent="1" style="whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;" value="Azure Front Door" vertex="1">
+                    <mxGeometry height="19.4" width="120" x="-105" y="170.6" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>
