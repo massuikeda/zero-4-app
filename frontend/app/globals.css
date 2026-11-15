@@ -50,9 +50,7 @@ input[readonly], select:disabled { background: #f8f9fb; }
 .logo-map { color: #d6e7f8; }
 .logo-sub { font-size: 11px; color: #d6e7f8; margin-top: 3px; letter-spacing: 0.06em; }
 .topbar-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.dev-switch { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-.dev-switch span { background: var(--warn); padding: 2px 8px; border-radius: 99px; }
-.dev-switch select { color: var(--ink); padding: 3px 6px; }
+.dev-badge { background: var(--warn); color: #fff; font-size: 12px; padding: 2px 8px; border-radius: 99px; }
 .who { font-size: 13px; display: flex; align-items: center; gap: 6px; }
 .who em { font-style: normal; font-size: 11px; border: 1px solid #ffffff66; border-radius: 99px; padding: 0 8px; }
 .page { max-width: 1400px; margin: 0 auto; padding: 20px 24px 80px; }
@@ -520,3 +518,31 @@ tr.has-issue td:first-child { box-shadow: inset 3px 0 var(--danger); }
 .hearing-head p { margin: 2px 0 0; font-size: 13px; color: #5b6573; line-height: 1.6; }
 .hearing-box .notes { background: #fff; }
 .hearing-actions { align-items: center; }
+
+/* 企業一覧 */
+.company-add .field { display: flex; flex-direction: column; gap: 4px; flex: 1 1 220px; min-width: 0; }
+.company-add .field.narrow { flex: 0 1 140px; }
+.company-add .row { align-items: flex-end; }
+.company-add input[aria-invalid="true"] { border-color: var(--danger); }
+.error-text { color: var(--danger); }
+.company-table th.num, .company-table td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.company-link { color: var(--accent); font-weight: 700; text-decoration: none; }
+.company-link:hover { text-decoration: underline; }
+
+/* ログイン画面（銀行担当者用・企業用） */
+.login-wrap { display: flex; justify-content: center; padding: 48px 0; }
+.login-card { width: 100%; max-width: 460px; background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 32px 32px 24px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 6px 24px #0b1f3a12; }
+.login-wrap.bank .login-card { border-top: 5px solid #1f3a5f; }
+.login-wrap.company .login-card { border-top: 5px solid var(--accent); }
+.login-card h1 { font-size: 24px; }
+.login-card p { margin: 0; }
+.login-kind { align-self: flex-start; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; }
+.login-kind.bank { background: #1f3a5f; color: #fff; }
+.login-kind.company { background: var(--accent-soft); color: var(--accent); }
+.login-field { display: flex; flex-direction: column; gap: 6px; }
+.login-field select { padding: 9px 10px; font-size: 14px; }
+.login-btn { padding: 11px 14px; font-size: 15px; }
+.login-other { text-align: center; border-top: 1px solid var(--line); padding-top: 14px; }
+.login-other a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.login-other a:hover { text-decoration: underline; }

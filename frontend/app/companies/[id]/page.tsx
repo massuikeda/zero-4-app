@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useMe } from "@/components/AppShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { formatEmployees } from "@/lib/company";
 import { api } from "@/lib/api";
 import { RESOURCE_KINDS, type Business, type Company, type Resource, type ResourceKind, type UserRow } from "@/lib/types";
 
@@ -55,7 +56,11 @@ export default function CompanyPage() {
       <div className="title-row">
         <div>
           <h1>{company.name}</h1>
-          <p className="muted small">{company.note}</p>
+          <p className="muted small">
+            {[company.industry, company.employees != null ? `従業員 ${formatEmployees(company.employees)}` : "", company.note]
+              .filter(Boolean)
+              .join("・")}
+          </p>
         </div>
       </div>
       {error && <div className="alert">{error}</div>}
@@ -65,8 +70,8 @@ export default function CompanyPage() {
           {(
             [
               ["businesses", `業務一覧（${businesses.length}）`],
-              ["resources", `リソース（${resources.length}）`],
-              ["users", `担当者（${users.length}）`],
+              ["resources", `図の候補（部署・道具）（${resources.length}）`],
+              ["users", `企業ユーザー（${users.length}）`],
             ] as const
           ).map(([k, label]) => (
             <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>
@@ -81,26 +86,32 @@ export default function CompanyPage() {
           cid={cid}
           isAdmin={isAdmin}
           businesses={businesses}
-          users={users}
           resources={resources}
           onChange={load}
           guard={guard}
         />
       )}
       {tab === "resources" && isAdmin && <ResourceManager cid={cid} resources={resources} onChange={load} guard={guard} />}
-      {tab === "users" && isAdmin && (
-        <UserManager cid={cid} users={users} businesses={businesses} onChange={load} guard={guard} />
-      )}
+      {tab === "users" && isAdmin && <CompanyUserManager cid={cid} users={users} onChange={load} guard={guard} />}
     </div>
   );
 }
 
+/** 画面に出す種類名（データ上の値は変えない。「担当者」はログインユーザーと紛らわしいので「役割」と表示） */
+const KIND_LABEL: Record<ResourceKind, string> = {
+  部署: "部署",
+  担当者: "役割",
+  取引先: "取引先",
+  システム: "システム",
+  帳票: "帳票",
+};
+
 type Guard = (fn: () => Promise<unknown>) => Promise<void>;
 
 function BusinessList({
-  cid, isAdmin, businesses, users, resources, onChange, guard,
+  cid, isAdmin, businesses, resources, onChange, guard,
 }: {
-  cid: number; isAdmin: boolean; businesses: Business[]; users: UserRow[]; resources: Resource[];
+  cid: number; isAdmin: boolean; businesses: Business[]; resources: Resource[];
   onChange: () => void; guard: Guard;
 }) {
   const [form, setForm] = useState({ name: "", department: "", frequency: "" });
@@ -110,7 +121,7 @@ function BusinessList({
 
   return (
     <div className="stack">
-      {!isAdmin && <p className="muted small">あなたに割り当てられた業務が表示されています。</p>}
+      {!isAdmin && <p className="muted small">自社の業務が表示されています。</p>}
       {businesses.length > 5 && (
         <input className="search" placeholder="業務名・部署で絞り込み" value={query} onChange={(e) => setQuery(e.target.value)} />
       )}
@@ -122,7 +133,6 @@ function BusinessList({
               <th>部署</th>
               <th>頻度</th>
               <th>状況</th>
-              {isAdmin && <th>見られる担当者</th>}
               <th>更新日</th>
               {isAdmin && <th />}
             </tr>
@@ -140,15 +150,6 @@ function BusinessList({
                 <td>
                   <span className={`status s${["未着手", "AS-IS作成済", "TO-BE作成済"].indexOf(b.status)}`}>{b.status}</span>
                 </td>
-                {isAdmin && (
-                  <td>
-                    <AssigneePicker
-                      users={users}
-                      value={b.assignee_ids}
-                      onSave={(ids) => guard(() => api.setAssignees(b.id, ids).then(onChange))}
-                    />
-                  </td>
-                )}
                 <td className="small muted">{new Date(b.updated_at).toLocaleDateString("ja-JP")}</td>
                 {isAdmin && (
                   <td>
@@ -168,8 +169,8 @@ function BusinessList({
             ))}
             {shown.length === 0 && (
               <tr>
-                <td colSpan={7} className="muted center">
-                  {isAdmin ? "業務がまだありません" : "割り当てられた業務はありません。管理者に連絡してください"}
+                <td colSpan={6} className="muted center">
+                  {isAdmin ? "業務がまだありません" : "業務はまだ登録されていません。銀行の担当者にお問い合わせください"}
                 </td>
               </tr>
             )}
@@ -212,35 +213,13 @@ function BusinessList({
   );
 }
 
-function AssigneePicker({ users, value, onSave }: { users: UserRow[]; value: number[]; onSave: (ids: number[]) => void }) {
-  const names = users.filter((u) => value.includes(u.id)).map((u) => u.name);
-  return (
-    <details className="picker">
-      <summary>{names.length ? names.join("、") : <span className="muted">未割り当て</span>}</summary>
-      <div className="picker-body">
-        {users.length === 0 && <p className="muted small">「担当者」タブで登録してください</p>}
-        {users.map((u) => (
-          <label key={u.id} className="check">
-            <input
-              type="checkbox"
-              checked={value.includes(u.id)}
-              onChange={(e) => onSave(e.target.checked ? [...value, u.id] : value.filter((x) => x !== u.id))}
-            />
-            {u.name}
-          </label>
-        ))}
-      </div>
-    </details>
-  );
-}
-
 function ResourceManager({
   cid, resources, onChange, guard,
 }: { cid: number; resources: Resource[]; onChange: () => void; guard: Guard }) {
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const hint: Record<ResourceKind, string> = {
     部署: "スイムレーンに使えます",
-    担当者: "役割名（例：経理担当）。スイムレーンに使えます",
+    担当者: "部署の中の役割（例：経理担当）。スイムレーンに使えます",
     取引先: "社外の列（取引先など）",
     システム: "作業の「道具（札）」で選べます",
     帳票: "作業の「道具（札）」で選べます。紙として集計されます",
@@ -249,7 +228,7 @@ function ResourceManager({
     <div className="res-grid">
       {RESOURCE_KINDS.map((kind) => (
         <div className="card" key={kind}>
-          <h3>{kind}</h3>
+          <h3>{KIND_LABEL[kind]}</h3>
           <p className="muted small">{hint[kind]}</p>
           <ul className="res-list">
             {resources
@@ -278,7 +257,7 @@ function ResourceManager({
           </ul>
           <div className="row gap">
             <input
-              placeholder={`${kind}を追加`}
+              placeholder={`${KIND_LABEL[kind]}を追加`}
               value={inputs[kind] ?? ""}
               onChange={(e) => setInputs({ ...inputs, [kind]: e.target.value })}
               onKeyDown={(e) => {
@@ -298,16 +277,25 @@ function ResourceManager({
   );
 }
 
-function UserManager({
-  cid, users, businesses, onChange, guard,
-}: { cid: number; users: UserRow[]; businesses: Business[]; onChange: () => void; guard: Guard }) {
-  const [form, setForm] = useState({ email: "", name: "" });
-  const bname = (id: number) => businesses.find((b) => b.id === id)?.name ?? "";
+/** 企業ユーザー（この企業の人のログイン）。銀行担当者が登録する */
+function CompanyUserManager({
+  cid, users, onChange, guard,
+}: { cid: number; users: UserRow[]; onChange: () => void; guard: Guard }) {
+  const [form, setForm] = useState({ name: "", email: "" });
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
+
+  const add = () =>
+    guard(async () => {
+      await api.createUser({ name: form.name.trim(), email: form.email.trim(), role: "member", company_id: cid });
+      setForm({ name: "", email: "" });
+      onChange();
+    });
+
   return (
     <div className="stack">
       <p className="muted small">
-        担当者は、割り当てられた業務だけを見て、編集できます。割り当ては「業務一覧」タブで行います。
-        本番ではこのメールアドレスでEntra IDにログインします。
+        ここに登録した人は「企業の方のログイン」からログインし、この企業の業務だけを見られます（ヒアリング・AS-IS・TO-BE の閲覧と編集）。
+        本番では、同じメールアドレスの Microsoft アカウントでログインします（Entra ID にゲストとして招待してください）。
       </p>
       <div className="table-wrap">
         <table className="plain">
@@ -315,7 +303,6 @@ function UserManager({
             <tr>
               <th>名前</th>
               <th>メールアドレス</th>
-              <th>割り当て業務</th>
               <th />
             </tr>
           </thead>
@@ -324,39 +311,49 @@ function UserManager({
               <tr key={u.id}>
                 <td>{u.name}</td>
                 <td className="mono">{u.email}</td>
-                <td>{u.business_ids.map(bname).join("、") || <span className="muted">なし</span>}</td>
                 <td>
                   <button
                     className="btn-delete"
                     title="削除"
-                    onClick={() => confirm(`${u.name} を削除しますか？`) && guard(() => api.deleteUser(u.id).then(onChange))}
+                    onClick={() =>
+                      confirm(`「${u.name}」を削除しますか？この人はログインできなくなります。`) &&
+                      guard(() => api.deleteUser(u.id).then(onChange))
+                    }
                   >
                     削除
                   </button>
                 </td>
               </tr>
             ))}
+            {users.length === 0 && (
+              <tr>
+                <td colSpan={3} className="muted center">
+                  まだ登録されていません
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
-      <div className="card dashed row gap wrap">
-        <strong>担当者を追加</strong>
+      <form
+        className="card dashed row gap wrap"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (form.name.trim() && emailOk) add();
+        }}
+      >
+        <strong>企業ユーザーを追加</strong>
         <input placeholder="名前" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        <input placeholder="メールアドレス" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-        <button
-          className="btn primary"
-          disabled={!form.name.trim() || !form.email.includes("@")}
-          onClick={() =>
-            guard(async () => {
-              await api.createUser({ ...form, role: "member", company_id: cid });
-              setForm({ email: "", name: "" });
-              onChange();
-            })
-          }
-        >
+        <input
+          type="email"
+          placeholder="メールアドレス"
+          value={form.email}
+          onChange={(e) => setForm({ ...form, email: e.target.value })}
+        />
+        <button type="submit" className="btn primary" disabled={!form.name.trim() || !emailOk}>
           追加
         </button>
-      </div>
+      </form>
     </div>
   );
 }

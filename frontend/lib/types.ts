@@ -92,6 +92,10 @@ export interface UserRow extends Me {
 export interface Company {
   id: number;
   name: string;
+  /** 業種 */
+  industry: string;
+  /** 従業員数（人）。未入力は null */
+  employees: number | null;
   note: string;
   business_count: number;
 }

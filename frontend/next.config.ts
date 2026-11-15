@@ -1,19 +1,17 @@
 import type { NextConfig } from "next";
 
-// /api/* を Python バックエンドへ転送する（ブラウザからは同じドメインに見える）
-const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8000";
+// /api/* を Python バックエンドへ転送する処理は app/api/[...path]/route.ts にある
+// （転送先 BACKEND_URL を、ビルドのときではなく動いているときに読むため）
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Azure App Service 用：動かすのに必要なファイルだけを .next/standalone にまとめる（node server.js で起動）
+  output: "standalone",
   cacheComponents: true,
   partialPrefetching: true,
   // 画面はブラウザ側でデータを読み込む作りなので、「即時表示」の自動チェック（開発時の警告）は
   // 明示的に指定したページだけにする
   experimental: {
     instantInsights: { validationLevel: "manual-warning" },
-    // /api/* をバックエンドへ転送するときの待ち時間（既定は30秒）。
-    // AIでAS-ISを作るときは1分以上かかることがあるので、3分まで待つ
-    proxyTimeout: 180_000,
   },
   turbopack: {
     rules: {
@@ -22,9 +20,6 @@ const nextConfig: NextConfig = {
         as: "*.css",
       },
     },
-  },
-  async rewrites() {
-    return [{ source: "/api/:path*", destination: `${BACKEND_URL}/api/:path*` }];
   },
 };
 

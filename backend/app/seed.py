@@ -59,9 +59,9 @@ ORDER_TOBE = [
 def seed(db: Session) -> None:
     if db.scalar(select(User).limit(1)):
         return
-    db.add(User(email="admin@example.com", name="管理者（あなた）", role="admin"))
+    db.add(User(email="admin@example.com", name="銀行担当者（あなた）", role="admin"))
 
-    a = Company(name="株式会社サンプル商事", note="卸売業・従業員120名")
+    a = Company(name="株式会社サンプル商事", industry="卸売業", employees=120)
     for kind, names in {
         "部署": ["営業部（受注）", "倉庫（出荷）", "経理部"],
         "担当者": ["社員", "経理担当", "経理課長"],
@@ -137,7 +137,7 @@ def seed(db: Session) -> None:
     suzuki.businesses.append(inv)
     a.users += [tanaka, suzuki]
 
-    b = Company(name="山田製作所", note="製造業・従業員60名")
+    b = Company(name="山田製作所", industry="製造業", employees=60)
     for kind, n in [("部署", "製造部"), ("部署", "購買部"), ("取引先", "仕入先"), ("システム", "生産管理システム")]:
         b.resources.append(Resource(kind=kind, name=n))
     buy = Business(name="部品発注業務", department="購買部", frequency="週20件")

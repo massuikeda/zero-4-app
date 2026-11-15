@@ -78,6 +78,8 @@ class Me(_Out):
 class CompanyOut(_Out):
     id: int
     name: str
+    industry: str = ""
+    employees: Optional[int] = None
     note: str
     business_count: int = 0
 
@@ -133,6 +135,8 @@ class FlowsOut(BaseModel):
 # ---------- 入力 ----------
 class CompanyIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
+    industry: str = Field("", max_length=100)  # 業種
+    employees: Optional[int] = Field(None, ge=0, le=10_000_000)  # 従業員数（人）
     note: str = ""
 
 

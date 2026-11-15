@@ -1,102 +1,113 @@
 "use client";
 
 import Link from "next/link";
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { Suspense, createContext, useContext, useEffect, useState } from "react";
 import { Logo } from "@/components/Logo";
 import { api } from "@/lib/api";
-import { AUTH_MODE, REDIRECT_PATH, getDevUser, initAuth, logout, setDevUser } from "@/lib/auth";
-import type { Me, UserRow } from "@/lib/types";
+import { AUTH_MODE, LOGIN_PATH, REDIRECT_PATH, getPortal, initAuth, isPublicPath, logout } from "@/lib/auth";
+import type { Me } from "@/lib/types";
 
 const MeContext = createContext<Me | null>(null);
 export const useMe = () => useContext(MeContext);
 
-export function AppShell({ children }: { children: React.ReactNode }) {
-  const [me, setMe] = useState<Me | null>(null);
-  // Entra ID からの戻り先ページ（/redirect）は、ログイン処理や画面の枠を通さずにそのまま表示する
-  const [bridge, setBridge] = useState(false);
-  const [devUsers, setDevUsers] = useState<UserRow[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
+/** 役割の表示名 */
+export const ROLE_LABEL: Record<string, string> = { admin: "銀行担当者", member: "企業担当者" };
 
-  const loadMe = useCallback(async () => {
-    try {
-      setMe(await api.me());
-      setError(null);
-    } catch (e) {
-      setMe(null);
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setReady(true);
-    }
-  }, []);
+type State =
+  | { kind: "loading" }
+  | { kind: "ready"; me: Me }
+  | { kind: "error"; message: string };
+
+/**
+ * 画面の枠（上のバー）とログイン確認。
+ * いまの URL（usePathname）を使うので、Next.js の決まりにより Suspense の中に置く。
+ */
+export function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <header className="topbar">
+          <Logo />
+        </header>
+      }
+    >
+      <Shell>{children}</Shell>
+    </Suspense>
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const isPublic = isPublicPath(pathname);
+  const [state, setState] = useState<State>({ kind: "loading" });
 
   useEffect(() => {
-    if (window.location.pathname === REDIRECT_PATH) {
-      setBridge(true);
-      return;
-    }
+    if (isPublic) return;
+    let cancelled = false;
     (async () => {
-      if (!(await initAuth())) return; // ログイン画面へ移動中
-      if (AUTH_MODE === "dev") {
-        try {
-          const users = await api.devUsers();
-          setDevUsers(users);
-          if (!getDevUser() && users[0]) setDevUser(users[0].email);
-        } catch (e) {
-          setError(`バックエンドに接続できません（${e instanceof Error ? e.message : e}）`);
-          setReady(true);
-          return;
-        }
+      if (!(await initAuth())) {
+        // ログインしていなければ、前に使ったログイン画面へ（初めてなら企業の方のログインへ）
+        router.replace(LOGIN_PATH[getPortal() ?? "company"]);
+        return;
       }
-      await loadMe();
+      try {
+        const me = await api.me();
+        if (!cancelled) setState({ kind: "ready", me });
+      } catch (e) {
+        if (!cancelled) setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+      }
     })();
-  }, [loadMe]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isPublic, router]);
 
-  const switchUser = (email: string) => {
-    setDevUser(email);
-    window.location.href = "/"; // 権限が変わるのでトップから読み直す
-  };
+  // Entra ID からの戻り先ページ（/redirect）は、画面の枠を通さずにそのまま表示する
+  if (pathname === REDIRECT_PATH) return <>{children}</>;
 
-  if (bridge) return <>{children}</>;
+  const me = !isPublic && state.kind === "ready" ? state.me : null;
 
   return (
     <MeContext.Provider value={me}>
       <header className="topbar">
-        <Link href="/" className="brand" aria-label="ミエルMAP トップへ">
+        <Link href={isPublic ? pathname : "/"} className="brand" aria-label="ミエルMAP トップへ">
           <Logo />
         </Link>
         <div className="topbar-right">
-          {AUTH_MODE === "dev" && devUsers.length > 0 && (
-            <label className="dev-switch" title="開発用：ユーザーを切り替えて権限を確認できます">
-              <span>開発用ユーザー</span>
-              <select value={me?.email ?? ""} onChange={(e) => switchUser(e.target.value)}>
-                {devUsers.map((u) => (
-                  <option key={u.id} value={u.email}>
-                    {u.role === "admin" ? "【管理者】" : "【担当者】"}
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {me && (
-            <span className="who">
-              {me.name}
-              <em>{me.role === "admin" ? "管理者" : "担当者"}</em>
+          {AUTH_MODE === "dev" && (
+            <span className="dev-badge" title="仮のログインです（ユーザーを選ぶだけで、パスワードはありません）。あとで Entra ID のログインに置き換えます">
+              仮ログイン
             </span>
           )}
-          {AUTH_MODE === "entra" && (
-            <button className="btn ghost light" onClick={logout}>
-              ログアウト
-            </button>
+          {me && (
+            <>
+              <span className="who">
+                {me.name}
+                <em>{ROLE_LABEL[me.role] ?? me.role}</em>
+              </span>
+              <button className="btn ghost light" onClick={() => logout()}>
+                ログアウト
+              </button>
+            </>
           )}
         </div>
       </header>
       <main className="page">
-        {!ready ? (
+        {isPublic ? (
+          children
+        ) : state.kind === "loading" ? (
           <p className="muted">読み込み中…</p>
-        ) : error && !me ? (
-          <div className="alert">{error}</div>
+        ) : state.kind === "error" ? (
+          <div className="stack">
+            <div className="alert">{state.message}</div>
+            <div>
+              <button className="btn ghost" onClick={() => logout()}>
+                ログイン画面に戻る
+              </button>
+            </div>
+          </div>
         ) : (
           children
         )}

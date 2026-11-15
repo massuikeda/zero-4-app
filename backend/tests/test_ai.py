@@ -15,7 +15,7 @@ from app.api import app  # noqa: E402
 from app.config import settings  # noqa: E402
 
 ADMIN = {"X-User-Email": "admin@example.com"}
-TANAKA = {"X-User-Email": "tanaka@sample-shoji.example"}  # 受注〜出荷業務のみ
+TANAKA = {"X-User-Email": "tanaka@sample-shoji.example"}  # サンプル商事の企業担当者
 
 
 class FakeClient:
@@ -66,8 +66,8 @@ def test_format_and_permissions(configured):
         assert call["model"] == "my-deploy"  # Azure はデプロイ名
         last = call["messages"][-1]["content"]
         assert "営業部（受注）" in last and "<record>\n営業はFAXを見て入力している\n</record>" in last
-        # 割り当てられていない業務は 404、空の記録は 400
-        other = _bid(c, "請求書発行業務")
+        # 他社の業務は 404、空の記録は 400
+        other = c.get("/api/companies/2/businesses", headers=ADMIN).json()[0]["id"]
         assert c.post(f"/api/businesses/{other}/hearing/format", json={"raw": "x"}, headers=TANAKA).status_code == 404
         assert c.post(f"/api/businesses/{bid}/hearing/format", json={"raw": "  "}, headers=TANAKA).status_code == 400
 

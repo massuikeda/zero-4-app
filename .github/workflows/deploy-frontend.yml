@@ -1,0 +1,75 @@
+# フロントエンド（Next.js）を Azure App Service にデプロイする。
+# main に frontend/ の変更が入ったとき、または Actions の画面から手動で実行したときに動く。
+# 必要な設定は docs/DEPLOY.md を参照。
+name: フロントエンドをデプロイ（App Service）
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-frontend.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-frontend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: ビルドしてデプロイ
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      # NEXT_PUBLIC_* は「ビルドのとき」に画面へ埋め込まれる（App Service のアプリ設定に入れても効かない）
+      # ※ バックエンドのURL（BACKEND_URL）はここではなく、フロントエンドの App Service のアプリ設定に入れる
+      # 今は仮のログイン（dev＝ユーザーを選ぶだけ）。Entra ID のログインを入れたら、変数を entra にする
+      NEXT_PUBLIC_AUTH_MODE: ${{ vars.NEXT_PUBLIC_AUTH_MODE || 'dev' }}
+      NEXT_PUBLIC_ENTRA_TENANT_ID: ${{ vars.NEXT_PUBLIC_ENTRA_TENANT_ID }}
+      NEXT_PUBLIC_ENTRA_SPA_CLIENT_ID: ${{ vars.NEXT_PUBLIC_ENTRA_SPA_CLIENT_ID }}
+      NEXT_PUBLIC_ENTRA_API_SCOPE: ${{ vars.NEXT_PUBLIC_ENTRA_API_SCOPE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 設定の確認
+        run: |
+          if [ -z "${{ vars.AZURE_FRONTEND_WEBAPP_NAME }}" ]; then
+            echo "::error::リポジトリの変数 AZURE_FRONTEND_WEBAPP_NAME（フロントエンドの App Service の名前）が設定されていません"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: パッケージのインストール
+        run: npm ci
+
+      - name: 型チェック
+        run: npx tsc --noEmit
+
+      - name: ビルド
+        run: npm run build
+
+      - name: デプロイ用にまとめる
+        run: |
+          # standalone には画面の部品（static）と public が入らないので足す
+          cp -r .next/static .next/standalone/.next/static
+          cp -r public .next/standalone/public
+          cd .next/standalone
+          zip -qr "$GITHUB_WORKSPACE/frontend.zip" .
+
+      - name: App Service にデプロイ
+        uses: azure/webapps-deploy@v3
+        with:
+          # 発行プロファイル（App Service ごとのデプロイ用のID・パスワード）でデプロイする
+          publish-profile: ${{ secrets.AZURE_FRONTEND_PUBLISH_PROFILE }}
+          app-name: ${{ vars.AZURE_FRONTEND_WEBAPP_NAME }}
+          package: frontend.zip

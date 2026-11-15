@@ -36,18 +36,19 @@ async function call<T>(path: string, init?: { method?: string; body?: unknown; t
   return (init?.text ? res.text() : res.json()) as Promise<T>;
 }
 
+type CompanyIn = { name: string; industry: string; employees: number | null; note?: string };
 type BusinessIn = Pick<Business, "name" | "department" | "frequency" | "description">;
 type NotesIn = Partial<Pick<Business, "hearing_raw" | "hearing_notes" | "exec_view" | "field_view">>;
 
 export const api = {
   config: () => call<{ auth_mode: string; ai_enabled: boolean }>("/api/config"),
-  devUsers: () => call<UserRow[]>("/api/dev/users"),
+  devUsers: (role?: "admin" | "member") => call<UserRow[]>(`/api/dev/users${role ? `?role=${role}` : ""}`),
   me: () => call<Me>("/api/me"),
 
   companies: () => call<Company[]>("/api/companies"),
   company: (id: number) => call<Company>(`/api/companies/${id}`),
-  createCompany: (b: { name: string; note: string }) => call<Company>("/api/companies", { body: b }),
-  updateCompany: (id: number, b: { name: string; note: string }) =>
+  createCompany: (b: CompanyIn) => call<Company>("/api/companies", { body: b }),
+  updateCompany: (id: number, b: CompanyIn) =>
     call<Company>(`/api/companies/${id}`, { method: "PUT", body: b }),
   deleteCompany: (id: number) => call(`/api/companies/${id}`, { method: "DELETE" }),
 

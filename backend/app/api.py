@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import ai, render
-from .auth import can_see_company, current_user, get_business_or_404, require_admin
+from .auth import can_see_company, current_user, find_user, get_business_or_404, require_admin
 from .config import settings
 from .db import Business, Company, FlowDoc, Resource, SessionLocal, User, get_db, init_db, now
 from .schemas import (
@@ -71,11 +71,14 @@ def config():
 
 
 @app.get("/api/dev/users", response_model=list[UserOut])
-def dev_users(db: Session = Depends(get_db)):
-    """開発モードのユーザー切り替え用。本番（entra）では使えない。"""
+def dev_users(role: str | None = None, db: Session = Depends(get_db)):
+    """開発モードのログイン画面で選ぶユーザーの一覧（role=admin / member で絞り込み）。本番（entra）では使えない。"""
     if settings.auth_mode != "dev":
         raise HTTPException(404)
-    return [_user_out(u) for u in db.scalars(select(User).order_by(User.role, User.company_id, User.id))]
+    q = select(User).order_by(User.role, User.company_id, User.id)
+    if role:
+        q = q.where(User.role == role)
+    return [_user_out(u) for u in db.scalars(q)]
 
 
 @app.get("/api/me", response_model=Me)
@@ -92,9 +95,7 @@ def list_companies(user: User = Depends(current_user), db: Session = Depends(get
     out = []
     for c in db.scalars(q):
         o = CompanyOut.model_validate(c)
-        o.business_count = (
-            len(c.businesses) if user.role == "admin" else sum(1 for b in c.businesses if user in b.assignees)
-        )
+        o.business_count = len(c.businesses)
         out.append(o)
     return out
 
@@ -115,7 +116,8 @@ def create_company(body: CompanyIn, _: User = Depends(require_admin), db: Sessio
 @app.put("/api/companies/{cid}", response_model=CompanyOut)
 def update_company(cid: int, body: CompanyIn, user: User = Depends(require_admin), db: Session = Depends(get_db)):
     c = _company_or_404(db, user, cid)
-    c.name, c.note = body.name, body.note
+    for k, v in body.model_dump().items():
+        setattr(c, k, v)
     db.commit()
     return c
 
@@ -171,8 +173,6 @@ def delete_resource(rid: int, _: User = Depends(require_admin), db: Session = De
 def list_businesses(cid: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     _company_or_404(db, user, cid)
     q = select(Business).where(Business.company_id == cid).order_by(Business.id)
-    if user.role != "admin":
-        q = q.where(Business.assignees.any(User.id == user.id))  # 割り当てられた業務だけ
     return [_business_out(b, user) for b in db.scalars(q)]
 
 
@@ -329,8 +329,10 @@ def list_users(cid: int, user: User = Depends(require_admin), db: Session = Depe
 @app.post("/api/users", response_model=UserOut)
 def create_user(body: UserIn, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     if body.role == "member" and not body.company_id:
-        raise HTTPException(422, "担当者には企業の指定が必要です")
-    if db.scalar(select(User).where(User.email.ilike(body.email))):
+        raise HTTPException(422, "企業担当者には企業の指定が必要です")
+    if body.company_id and not db.get(Company, body.company_id):
+        raise HTTPException(422, "企業が見つかりません")
+    if find_user(db, body.email):
         raise HTTPException(409, "このメールアドレスは登録済みです")
     u = User(**body.model_dump())
     db.add(u)

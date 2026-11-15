@@ -21,21 +21,26 @@ def _ids(c):
     return {b["name"]: b["id"] for b in bs}
 
 
-def test_member_sees_only_assigned():
+def test_member_sees_own_company_only():
     with TestClient(app) as c:
         ids = _ids(c)
         assert len(ids) == 3
+        # 企業担当者は自社の業務すべてを見られる（割り当ては不要）
         mine = c.get("/api/companies/1/businesses", headers=TANAKA).json()
-        assert [b["name"] for b in mine] == ["受注〜出荷業務"]
-        assert c.get(f"/api/businesses/{ids['請求書発行業務']}", headers=TANAKA).status_code == 404
-        assert c.get(f"/api/businesses/{ids['請求書発行業務']}/flows", headers=TANAKA).status_code == 404
+        assert sorted(b["name"] for b in mine) == sorted(ids)
+        assert c.get(f"/api/businesses/{ids['請求書発行業務']}", headers=TANAKA).status_code == 200
+        assert c.get(f"/api/businesses/{ids['請求書発行業務']}/flows", headers=TANAKA).status_code == 200
+        assert [x["id"] for x in c.get("/api/companies", headers=TANAKA).json()] == [1]
         # 他社の企業・業務は見えない
         assert [x["id"] for x in c.get("/api/companies", headers=SATO).json()] == [2]
         assert c.get("/api/companies/1/businesses", headers=SATO).status_code == 404
         assert c.get(f"/api/businesses/{ids['請求書発行業務']}", headers=SATO).status_code == 404
-        # 管理者向け操作はできない
+        # 銀行担当者向けの操作はできない
         assert c.post("/api/companies", json={"name": "x"}, headers=TANAKA).status_code == 403
         assert c.get("/api/companies/1/users", headers=TANAKA).status_code == 403
+        assert c.post("/api/companies/1/businesses", json={"name": "x"}, headers=TANAKA).status_code == 403
+        assert c.post("/api/companies/1/resources", json={"kind": "部署", "name": "x"}, headers=TANAKA).status_code == 403
+        assert c.delete(f"/api/businesses/{ids['請求書発行業務']}", headers=TANAKA).status_code == 403
         # 未登録ユーザー
         assert c.get("/api/me", headers={"X-User-Email": "nobody@x"}).status_code == 403
 
@@ -80,3 +85,57 @@ def test_counters_and_notes():
         assert (cmp["tobe_manual"], cmp["tobe_mail"], cmp["tobe_paper"]) == (0, 0, 0)
         r = c.put(f"/api/businesses/{bid}/notes", json={"field_view": "残業が続いている"}, headers=TANAKA).json()
         assert r["field_view"] == "残業が続いている" and r["exec_view"] == "受注から出荷まで、問題なく回っている"
+
+
+def test_company_industry_and_employees():
+    with TestClient(app) as c:
+        cs = c.get("/api/companies", headers=ADMIN).json()
+        assert {(x["industry"], x["employees"]) for x in cs} >= {("卸売業", 120), ("製造業", 60)}
+        r = c.post("/api/companies", headers=ADMIN, json={"name": "テスト工業", "industry": "建設業", "employees": 35})
+        assert r.status_code == 200
+        assert (r.json()["industry"], r.json()["employees"]) == ("建設業", 35)
+        # 従業員数は空でもよい
+        r = c.post("/api/companies", headers=ADMIN, json={"name": "空欄商店", "industry": "", "employees": None})
+        assert r.status_code == 200 and r.json()["employees"] is None
+        # 数値でない・マイナスは受け付けない
+        for bad in ("たくさん", -1, 1.5):
+            assert c.post("/api/companies", headers=ADMIN, json={"name": "x", "employees": bad}).status_code == 422
+        # 担当者は企業を追加できない
+        assert c.post("/api/companies", headers=TANAKA, json={"name": "y"}).status_code == 403
+
+
+def test_login_portal_must_match_role():
+    with TestClient(app) as c:
+        bank = {"X-Login-Portal": "bank"}
+        company = {"X-Login-Portal": "company"}
+        assert c.get("/api/me", headers={**ADMIN, **bank}).json()["role"] == "admin"
+        assert c.get("/api/me", headers={**TANAKA, **company}).json()["role"] == "member"
+        # 入口を取り違えたら断る
+        r = c.get("/api/me", headers={**ADMIN, **company})
+        assert r.status_code == 403 and "銀行担当者のログイン" in r.json()["detail"]
+        r = c.get("/api/me", headers={**TANAKA, **bank})
+        assert r.status_code == 403 and "企業の方のログイン" in r.json()["detail"]
+        # 開発用ログイン画面の候補は役割で絞り込める
+        assert {u["role"] for u in c.get("/api/dev/users?role=member").json()} == {"member"}
+        assert {u["role"] for u in c.get("/api/dev/users?role=admin").json()} == {"admin"}
+
+
+def test_email_is_exact_match():
+    with TestClient(app) as c:
+        # 「_」「%」はあいまい検索の記号として扱わない
+        assert c.get("/api/me", headers={"X-User-Email": "tanak_@sample-shoji.example"}).status_code == 403
+        assert c.get("/api/me", headers={"X-User-Email": "%@example.com"}).status_code == 403
+        assert c.get("/api/me", headers={"X-User-Email": "ADMIN@example.com"}).status_code == 200
+
+
+def test_bank_registers_company_user():
+    with TestClient(app) as c:
+        r = c.post("/api/users", headers=ADMIN,
+                   json={"email": "new@yamada-ss.example", "name": "新人", "role": "member", "company_id": 2})
+        assert r.status_code == 200
+        new = {"X-User-Email": "new@yamada-ss.example"}
+        assert [x["id"] for x in c.get("/api/companies", headers=new).json()] == [2]
+        assert c.post("/api/users", headers=ADMIN, json={"email": "x@x", "name": "x", "role": "member"}).status_code == 422
+        assert c.post("/api/users", headers=ADMIN,
+                      json={"email": "New@yamada-ss.example", "name": "重複", "role": "member", "company_id": 2}).status_code == 409
+        assert c.delete(f"/api/users/{r.json()['id']}", headers=ADMIN).status_code == 200

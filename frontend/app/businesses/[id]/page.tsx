@@ -38,6 +38,8 @@ export default function BusinessPage() {
   const isAdmin = me?.role === "admin";
 
   const [tab, setTab] = useState<Tab>("asis");
+  /** タブを最初に決めた業務のID（同じ業務を読み直したときはタブを変えない） */
+  const openedBid = useRef<number | null>(null);
   const [business, setBusiness] = useState<Business | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
   const [resources, setResources] = useState<Resource[]>([]);
@@ -72,7 +74,12 @@ export default function BusinessPage() {
       setResources(r);
       setNotes({ hearing_raw: b.hearing_raw, hearing_notes: b.hearing_notes, exec_view: b.exec_view, field_view: b.field_view, dirty: false });
       setDrafts({ asis: fromDoc(f.asis), tobe: fromDoc(f.tobe) });
-      if (!f.asis) setTab("notes"); // AS-ISがまだなければ、ヒアリングから始める
+      // 開いたときのタブ：AS-ISがまだなければヒアリング、あればAS-IS。
+      // 前に開いていた別の業務のタブが残らないよう、どちらの場合も決める（保存後の読み直しでは変えない）
+      if (openedBid.current !== bid) {
+        openedBid.current = bid;
+        setTab(f.asis ? "asis" : "notes");
+      }
       api.config().then((x) => setAiEnabled(!!x.ai_enabled), () => setAiEnabled(false));
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
@@ -81,6 +88,10 @@ export default function BusinessPage() {
 
   useEffect(() => {
     if (me) load();
+    // 画面を離れたら、次に開いたときにタブを決め直す
+    return () => {
+      openedBid.current = null;
+    };
   }, [me, load]);
 
   const anyDirty = notes.dirty || !!drafts.asis?.dirty || !!drafts.tobe?.dirty;

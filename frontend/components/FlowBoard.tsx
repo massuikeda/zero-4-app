@@ -867,7 +867,7 @@ function AddLaneForm({
     .map((r) => r.name);
   return (
     <div className="fb-addlane-form">
-        {candidates.length === 0 && <p className="insp-note">リソースの候補はすべて追加済みです。名前を入れて追加できます。</p>}
+        {candidates.length === 0 && <p className="insp-note">「図の候補」に登録した部署・役割・取引先はすべて追加済みです。名前を入れて追加できます。</p>}
         {candidates.map((n) => (
           <button key={n} className="chip-btn" onClick={() => onAdd(n)}>
             ＋ {n}

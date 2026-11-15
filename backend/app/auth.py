@@ -3,6 +3,13 @@
 - AUTH_MODE=dev   : ヘッダー X-User-Email のユーザーとして扱う（開発・デモ用）
 - AUTH_MODE=entra : Entra ID のアクセストークンを検証し、メールアドレスでユーザーを特定
 
+役割
+- admin （銀行担当者）: すべての企業・業務を見られる。企業・業務・図の候補・企業ユーザーの登録
+- member（企業担当者）: 自社の業務だけを見られる。ヒアリング・AS-IS・TO-BEの閲覧と編集
+
+ログイン画面は「銀行担当者用」と「企業用」に分かれている。画面は X-Login-Portal（bank / company）を送り、
+役割と合わない画面からのログインは断る（入口を取り違えないための確認。権限そのものは役割で判定する）。
+
 権限の判定はすべてサーバー側で行う（画面で隠すだけにしない）。
 """
 from __future__ import annotations
@@ -10,7 +17,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from fastapi import Depends, Header, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -46,9 +53,22 @@ def _email_from_token(token: str) -> str:
     return email
 
 
+PORTAL_ROLE = {"bank": "admin", "company": "member"}
+PORTAL_ERROR = {
+    "bank": "このアカウントは企業の方のアカウントです。「企業の方のログイン」からログインしてください",
+    "company": "このアカウントは銀行担当者のアカウントです。「銀行担当者のログイン」からログインしてください",
+}
+
+
+def find_user(db: Session, email: str) -> User | None:
+    """メールアドレスで探す（大文字・小文字は区別しない。完全一致）"""
+    return db.scalar(select(User).where(func.lower(User.email) == email.strip().lower()))
+
+
 def current_user(
     authorization: str | None = Header(default=None),
     x_user_email: str | None = Header(default=None),
+    x_login_portal: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> User:
     if settings.auth_mode == "entra":
@@ -59,15 +79,17 @@ def current_user(
         if not x_user_email:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ユーザーを選択してください")
         email = x_user_email
-    user = db.scalar(select(User).where(User.email.ilike(email)))
+    user = find_user(db, email)
     if not user:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, f"{email} は登録されていません。管理者に連絡してください")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f"{email} は登録されていません。銀行の担当者に連絡してください")
+    if x_login_portal in PORTAL_ROLE and user.role != PORTAL_ROLE[x_login_portal]:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, PORTAL_ERROR[x_login_portal])
     return user
 
 
 def require_admin(user: User = Depends(current_user)) -> User:
     if user.role != "admin":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "管理者のみ操作できます")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "銀行担当者のみ操作できます")
     return user
 
 
@@ -76,10 +98,10 @@ def can_see_company(user: User, company_id: int) -> bool:
 
 
 def can_access_business(user: User, b: Business) -> bool:
-    """管理者はすべて。担当者は自社かつ割り当てられた業務だけ。"""
+    """銀行担当者はすべて。企業担当者は自社の業務すべて。"""
     if user.role == "admin":
         return True
-    return user.company_id == b.company_id and any(a.id == user.id for a in b.assignees)
+    return user.company_id is not None and user.company_id == b.company_id
 
 
 def get_business_or_404(db: Session, user: User, business_id: int) -> Business:

@@ -37,6 +37,8 @@ class Company(Base):
     __tablename__ = "companies"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
+    industry: Mapped[str] = mapped_column(String(100), default="")  # 業種
+    employees: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 従業員数（未入力は空）
     note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
@@ -108,8 +110,26 @@ class FlowDoc(Base):
     business: Mapped[Business] = relationship(back_populates="flows")
 
 
-_connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=_connect_args)
+def _engine_options(url: str) -> dict:
+    """DBの種類ごとの接続設定"""
+    if url.startswith("sqlite"):
+        return {"connect_args": {"check_same_thread": False}}
+    if url.startswith("mysql"):
+        opts: dict = {
+            # Azure はしばらく使っていない接続を切るので、使う前に確かめ、古い接続は作り直す
+            "pool_pre_ping": True,
+            "pool_recycle": 280,
+        }
+        if settings.db_ssl:
+            # Azure Database for MySQL は暗号化（TLS）した接続だけを受け付ける。証明書も確認する
+            import ssl
+
+            opts["connect_args"] = {"ssl": ssl.create_default_context()}
+        return opts
+    return {"pool_pre_ping": True}
+
+
+engine = create_engine(settings.database_url, **_engine_options(settings.database_url))
 
 if settings.database_url.startswith("sqlite"):
     from sqlalchemy import event
@@ -131,7 +151,11 @@ def get_db():
 
 
 # あとから増やした列（既存のDBには無いので、起動時に足す）
-_ADDED_COLUMNS = [("businesses", "hearing_raw", "TEXT NOT NULL DEFAULT ''")]
+_ADDED_COLUMNS = [
+    ("businesses", "hearing_raw", "TEXT NOT NULL DEFAULT ''"),
+    ("companies", "industry", "VARCHAR(100) NOT NULL DEFAULT ''"),
+    ("companies", "employees", "INTEGER"),
+]
 
 
 def init_db():
@@ -142,4 +166,24 @@ def init_db():
     with engine.begin() as conn:
         for table, col, ddl in _ADDED_COLUMNS:
             if col not in {c["name"] for c in insp.get_columns(table)}:
+                if engine.dialect.name == "mysql":
+                    ddl = ddl.replace("DEFAULT ''", "DEFAULT ('')")  # MySQL は TEXT の初期値をかっこで書く
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+        _move_company_note(conn)
+
+
+def _move_company_note(conn) -> None:
+    """業種・従業員数の列ができる前は、メモに「卸売業・従業員120名」の形で書いていた。
+    業種・従業員数がどちらも空で、メモがその形の企業だけ、業種・従業員数へ移す（形が違うメモはそのまま残す）"""
+    import re
+
+    from sqlalchemy import text
+
+    pat = re.compile(r"^\s*(?P<ind>[^・]+?)\s*・\s*従業員\s*(?P<num>[\d,]+)\s*名\s*$")
+    for cid, note in conn.execute(text("SELECT id, note FROM companies WHERE industry = '' AND employees IS NULL")).all():
+        m = pat.match(note or "")
+        if m:
+            conn.execute(
+                text("UPDATE companies SET industry = :i, employees = :e, note = '' WHERE id = :id"),
+                {"i": m["ind"], "e": int(m["num"].replace(",", "")), "id": cid},
+            )
