@@ -557,3 +557,26 @@ table.plain .saved.minus { color: var(--danger); }
   background: var(--accent-soft); border: 1px solid #c5dbf2; border-radius: 8px; padding: 10px 14px; }
 .ai-note > div { display: flex; flex-direction: column; gap: 2px; }
 .ai-note strong { color: var(--accent); }
+
+/* TO-BEの案（梅・竹・松）の切り替え */
+.plan-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.plan-tab { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px 14px; background: #fff;
+  border: 1px solid var(--line); border-top: 4px solid var(--line); border-radius: 8px; color: var(--ink); cursor: pointer; }
+.plan-tab:hover { border-color: var(--accent); }
+.plan-tab.on { border-color: var(--accent); background: var(--accent-soft); }
+.plan-tab.ume { border-top-color: #c2577a; }
+.plan-tab.take { border-top-color: #3b8a4a; }
+.plan-tab.matsu { border-top-color: #1f5f3a; }
+.plan-name { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 800; }
+.plan-desc { font-size: 12px; color: var(--muted); }
+.plan-state { font-size: 13px; font-weight: 700; color: var(--good); font-variant-numeric: tabular-nums; }
+.plan-state.none { color: var(--muted); font-weight: 400; }
+.plan-adopted, .plan-of { font-style: normal; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 99px;
+  background: var(--accent); color: #fff; }
+.plan-of { margin-left: 6px; background: #eef2f7; color: #2b3445; }
+.plan-badge { display: inline-block; min-width: 2em; text-align: center; padding: 2px 10px; border-radius: 6px; color: #fff; }
+.plan-badge.ume { background: #c2577a; }
+.plan-badge.take { background: #3b8a4a; }
+.plan-badge.matsu { background: #1f5f3a; }
+table.plan-summary tr.adopted td { background: var(--accent-soft); }
+@media (max-width: 720px) { .plan-tabs { grid-template-columns: 1fr; } }

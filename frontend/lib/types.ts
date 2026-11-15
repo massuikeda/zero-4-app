@@ -7,7 +7,19 @@ export const MEDIA = ["FAX", "メール", "電話", "配達", "郵送", "手渡�
 export type StepType = (typeof STEP_TYPES)[number];
 export type ChangeAction = (typeof CHANGE_ACTIONS)[number];
 export type ResourceKind = (typeof RESOURCE_KINDS)[number];
-export type FlowKind = "asis" | "tobe";
+/** TO-BE は松竹梅の3案（梅＝やり方の見直しだけ／竹＝手ごろなツールの導入／松＝RPA・システム連携で自動化） */
+export const PLANS = ["ume", "take", "matsu"] as const;
+export type Plan = (typeof PLANS)[number];
+export const PLAN_LABEL: Record<Plan, string> = { ume: "梅", take: "竹", matsu: "松" };
+export const PLAN_DESC: Record<Plan, string> = {
+  ume: "お金をかけず、やり方だけを見直す",
+  take: "手ごろなツールやクラウドサービスを入れる",
+  matsu: "RPAやシステム連携で自動化する",
+};
+export type TobeKind = `tobe_${Plan}`;
+export type FlowKind = "asis" | TobeKind;
+export const planKind = (plan: Plan): TobeKind => `tobe_${plan}`;
+export const FLOW_KINDS: FlowKind[] = ["asis", ...PLANS.map(planKind)];
 
 export const CHANGE_COLORS: Record<ChangeAction, string> = {
   排除: "#9E9E9E",
@@ -49,6 +61,12 @@ export interface Step {
 export interface Flow {
   lanes: string[];
   steps: Step[];
+  /** TO-BEの案の要約（AS-ISでは使わない） */
+  summary?: string;
+  /** TO-BEの案で、導入・準備が必要なもの */
+  needs?: string[];
+  /** TO-BEの案で、なくした作業（排除）の理由。作業ID → 理由 */
+  removed_notes?: Record<string, string>;
 }
 
 export interface FlowDoc {
@@ -124,7 +142,12 @@ export interface Business {
   field_view: string;
   updated_at: string;
   status: "未着手" | "AS-IS作成済" | "TO-BE作成済";
-  /** 削減時間（1回あたり・分）。TO-BEがまだなければ null */
+  /** 採用する案（未選択は空） */
+  adopted_plan: Plan | "";
+  /** 案ごとの削減時間（1回あたり・分）。作成済みの案だけ入る */
+  saved_by_plan: Partial<Record<Plan, number>>;
+  /** 一覧に出す削減時間：採用する案のもの。未選択なら竹。その案がまだなければ null */
+  saved_plan: Plan | null;
   saved_minutes: number | null;
   assignee_ids: number[];
 }
@@ -143,7 +166,13 @@ export interface TobeChange {
   issue_resolved?: boolean;
 }
 
-export interface TobeSuggestion {
+export interface TobePlan {
   summary: string;
+  needs: string[];
   changes: TobeChange[];
+}
+
+/** AIが出したTO-BEの改善案（出せた案だけ入る） */
+export interface TobeSuggestion {
+  plans: Partial<Record<Plan, TobePlan>>;
 }

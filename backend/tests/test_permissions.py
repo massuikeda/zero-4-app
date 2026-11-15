@@ -50,21 +50,32 @@ def test_member_can_edit_assigned_flow_and_conflict():
         bid = _ids(c)["請求書発行業務"]
         TANAKA = SUZUKI  # noqa: N806  この業務の担当者
         f = c.get(f"/api/businesses/{bid}/flows", headers=TANAKA).json()
-        assert f["asis"] and f["tobe"] is None
-        r = c.post(f"/api/businesses/{bid}/flows/tobe/copy-from-asis", headers=TANAKA)
+        assert f["asis"] and f["plans"] == {} and f["comparisons"] == {}
+        # TO-BEは松竹梅の3案。ここでは「梅」を作る
+        assert c.post(f"/api/businesses/{bid}/flows/asis/copy-from-asis", headers=TANAKA).status_code == 422
+        r = c.post(f"/api/businesses/{bid}/flows/tobe_ume/copy-from-asis", headers=TANAKA)
         assert r.status_code == 200, r.text
         tobe = r.json()
         tobe["data"]["steps"] = [s for s in tobe["data"]["steps"] if s["type"] != "待ち"]
         tobe["data"]["steps"][1]["change"] = "自動化"
         tobe["data"]["steps"][1]["minutes"] = 5
-        ok = c.put(f"/api/businesses/{bid}/flows/tobe", json={"data": tobe["data"], "version": tobe["version"]}, headers=TANAKA)
+        tobe["data"]["summary"] = "入力を自動化する"
+        tobe["data"]["needs"] = ["OCRサービス"]
+        tobe["data"]["removed_notes"] = {"S99": "RPAが自動で取り込むので不要"}
+        ok = c.put(f"/api/businesses/{bid}/flows/tobe_ume", json={"data": tobe["data"], "version": tobe["version"]}, headers=TANAKA)
         assert ok.status_code == 200 and ok.json()["version"] == 2
         # 古いversionでの保存は拒否
-        ng = c.put(f"/api/businesses/{bid}/flows/tobe", json={"data": tobe["data"], "version": 1}, headers=ADMIN)
+        ng = c.put(f"/api/businesses/{bid}/flows/tobe_ume", json={"data": tobe["data"], "version": 1}, headers=ADMIN)
         assert ng.status_code == 409
-        cmp = c.get(f"/api/businesses/{bid}/flows", headers=ADMIN).json()["comparison"]
+        # 以前の種類（1案だけだったころの「tobe」）や、決まっていない種類は受け付けない
+        assert c.put(f"/api/businesses/{bid}/flows/tobe", json={"data": tobe["data"], "version": 0}, headers=ADMIN).status_code == 422
+        fl = c.get(f"/api/businesses/{bid}/flows", headers=ADMIN).json()
+        assert list(fl["plans"]) == ["ume"] and fl["plans"]["ume"]["data"]["summary"] == "入力を自動化する"
+        assert fl["plans"]["ume"]["data"]["needs"] == ["OCRサービス"]
+        assert fl["plans"]["ume"]["data"]["removed_notes"] == {"S99": "RPAが自動で取り込むので不要"}
+        cmp = fl["comparisons"]["ume"]
         assert cmp["tobe_steps"] == 5 and cmp["reduction_rate"] > 0
-        x = c.get(f"/api/businesses/{bid}/flows/tobe/drawio", headers=TANAKA)
+        x = c.get(f"/api/businesses/{bid}/flows/tobe_ume/drawio", headers=TANAKA)
         assert x.status_code == 200 and x.text.startswith("<mxfile")
         assert c.put(f"/api/businesses/{bid}/flows/asis", json={"data": tobe["data"], "version": 1}, headers=SATO).status_code == 404
 
@@ -79,7 +90,7 @@ def test_assign_rules():
 def test_counters_and_notes():
     with TestClient(app) as c:
         bid = _ids(c)["受注〜出荷業務"]
-        cmp = c.get(f"/api/businesses/{bid}/flows", headers=TANAKA).json()["comparison"]
+        cmp = c.get(f"/api/businesses/{bid}/flows", headers=TANAKA).json()["comparisons"]["take"]
         # 画像の例：手入力・転記3回、メール連絡2回、紙2か所
         assert (cmp["asis_manual"], cmp["asis_mail"], cmp["asis_paper"]) == (3, 2, 2)
         assert (cmp["tobe_manual"], cmp["tobe_mail"], cmp["tobe_paper"]) == (0, 0, 0)
@@ -144,10 +155,45 @@ def test_bank_registers_company_user():
 def test_saved_minutes_in_business_list():
     with TestClient(app) as c:
         bs = {b["name"]: b for b in c.get("/api/companies/1/businesses", headers=ADMIN).json()}
-        b = bs["受注〜出荷業務"]  # デモデータでTO-BEまで作成済み
-        cmp = c.get(f"/api/businesses/{b['id']}/flows", headers=ADMIN).json()["comparison"]
-        # 一覧の削減時間は、比較タブと同じ値
-        assert b["saved_minutes"] == cmp["asis_minutes"] - cmp["tobe_minutes"] > 0
+        b = bs["受注〜出荷業務"]  # デモデータで「竹」の案まで作成済み
+        cmp = c.get(f"/api/businesses/{b['id']}/flows", headers=ADMIN).json()["comparisons"]["take"]
+        # 一覧の削減時間は、比較タブと同じ値。採用する案が未選択なら「竹」
+        assert b["adopted_plan"] == "" and b["saved_plan"] == "take"
+        assert b["saved_minutes"] == b["saved_by_plan"]["take"] == cmp["asis_minutes"] - cmp["tobe_minutes"] > 0
         # TO-BEがまだない業務は空
         no_tobe = [x for x in c.get("/api/companies/1/businesses", headers=ADMIN).json() if x["status"] != "TO-BE作成済"]
         assert no_tobe and all(x["saved_minutes"] is None for x in no_tobe)
+
+
+def test_adopt_plan():
+    with TestClient(app) as c:
+        bid = c.post("/api/companies/1/businesses", headers=ADMIN, json={"name": "採用する案のテスト"}).json()["id"]
+
+        def step(sid, minutes, nxt):
+            return {"id": sid, "lane": "経理部", "name": f"作業{sid}", "minutes": minutes, "next": nxt}
+
+        asis = {"lanes": ["経理部"], "steps": [step("S01", 10, ["S02"]), step("S02", 20, ["S03"]), step("S03", 5, [])]}
+        assert c.put(f"/api/businesses/{bid}/flows/asis", json={"data": asis, "version": 0}, headers=ADMIN).status_code == 200
+        b = c.get(f"/api/businesses/{bid}", headers=ADMIN).json()
+        assert b["status"] == "AS-IS作成済" and b["saved_by_plan"] == {} and b["saved_minutes"] is None
+        # まだ作っていない案・決まっていない案は採用できない
+        assert c.put(f"/api/businesses/{bid}/adopted", json={"plan": "matsu"}, headers=ADMIN).status_code == 422
+        assert c.put(f"/api/businesses/{bid}/adopted", json={"plan": "極上"}, headers=ADMIN).status_code == 422
+        # 「松」だけ作る（S02 をなくし、S01 を 10分 → 4分に）
+        matsu = {"lanes": ["経理部"], "steps": [{**step("S01", 4, ["S03"]), "change": "自動化"}, step("S03", 5, [])],
+                 "summary": "RPAで転記を自動化する", "needs": ["RPAツール"]}
+        assert c.put(f"/api/businesses/{bid}/flows/tobe_matsu", json={"data": matsu, "version": 0}, headers=ADMIN).status_code == 200
+        b = c.get(f"/api/businesses/{bid}", headers=ADMIN).json()
+        # 竹がなく、採用も未選択なので、一覧の削減時間はまだ出ない
+        assert b["status"] == "TO-BE作成済" and b["saved_by_plan"] == {"matsu": 26} and b["saved_minutes"] is None
+        # 企業担当者も採用する案を選べる。選ぶと一覧に出る
+        r = c.put(f"/api/businesses/{bid}/adopted", json={"plan": "matsu"}, headers=TANAKA)
+        assert r.status_code == 200
+        assert (r.json()["adopted_plan"], r.json()["saved_plan"], r.json()["saved_minutes"]) == ("matsu", "matsu", 26)
+        listed = {x["id"]: x for x in c.get("/api/companies/1/businesses", headers=ADMIN).json()}[bid]
+        assert listed["saved_minutes"] == 26 and listed["saved_plan"] == "matsu"
+        # 他社の人には 404。未選択に戻せる
+        assert c.put(f"/api/businesses/{bid}/adopted", json={"plan": "matsu"}, headers=SATO).status_code == 404
+        r = c.put(f"/api/businesses/{bid}/adopted", json={"plan": None}, headers=ADMIN).json()
+        assert r["adopted_plan"] == "" and r["saved_minutes"] is None
+        c.delete(f"/api/businesses/{bid}", headers=ADMIN)

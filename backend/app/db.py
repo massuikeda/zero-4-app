@@ -87,6 +87,7 @@ class Business(Base):
     hearing_notes: Mapped[str] = mapped_column(Text, default="")  # 決まった形式（ここからAS-ISを作る）
     exec_view: Mapped[str] = mapped_column(Text, default="")   # 経営者の認識
     field_view: Mapped[str] = mapped_column(Text, default="")  # 現場の実態
+    adopted_plan: Mapped[str] = mapped_column(String(10), default="")  # 採用するTO-BEの案（ume / take / matsu。未選択は空）
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
     company: Mapped[Company] = relationship(back_populates="businesses")
@@ -101,7 +102,8 @@ class FlowDoc(Base):
     __table_args__ = (UniqueConstraint("business_id", "kind"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), index=True)
-    kind: Mapped[str] = mapped_column(String(10))  # asis / tobe
+    # asis / tobe_ume / tobe_take / tobe_matsu（松竹梅の3案）。以前の「tobe」（1案だけだったころ）の行は使わない
+    kind: Mapped[str] = mapped_column(String(10))
     data: Mapped[dict] = mapped_column(JSON)
     version: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
@@ -155,6 +157,7 @@ _ADDED_COLUMNS = [
     ("businesses", "hearing_raw", "TEXT NOT NULL DEFAULT ''"),
     ("companies", "industry", "VARCHAR(100) NOT NULL DEFAULT ''"),
     ("companies", "employees", "INTEGER"),
+    ("businesses", "adopted_plan", "VARCHAR(10) NOT NULL DEFAULT ''"),
 ]
 
 

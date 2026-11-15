@@ -93,32 +93,47 @@ def test_tobe_suggest(monkeypatch):
     with TestClient(app) as c:
         bid = _bid(c, "請求書発行業務")  # デモデータ：AS-ISのみ
         asis = c.get(f"/api/businesses/{bid}/flows", headers=ADMIN).json()["asis"]["data"]
-        s0, s1 = asis["steps"][0], asis["steps"][1]
+        s0, s1, s2 = (asis["steps"][i] for i in range(3))
+        every = ", ".join('{"id": "%s", "action": "排除", "note": "x"}' % s["id"] for s in asis["steps"])
         answer = """```json
-{"summary": "入力を自動化する", "changes": [
-  {"id": "%s", "action": "自動化", "name": "データを取り込む", "minutes": 99999, "tool": "会計システム", "media": "システム連携", "note": "手入力をやめる", "issue_resolved": true},
-  {"id": "%s", "action": "排除", "name": "無視される名前", "note": "不要になる"},
-  {"id": "S999", "action": "自動化", "note": "AS-ISにない作業"},
-  {"id": "%s", "action": "排除", "note": "同じ作業への2つ目の変更"},
-  {"id": "%s", "action": "魔法", "note": "決まっていない変更区分"}
-]}
-```""" % (s0["id"], s1["id"], s0["id"], asis["steps"][2]["id"])
+{"plans": {
+  "ume": {"summary": "様式をそろえる", "needs": ["入力様式の統一ルール"], "changes": [
+    {"id": "%(s0)s", "action": "簡素化", "name": "定型文で依頼する", "minutes": 99999, "tool": "共有Excel", "media": "チャット", "note": "電話をやめ、メールの定型文で依頼する"},
+    {"id": "S999", "action": "簡素化", "note": "AS-ISにない作業"},
+    {"id": "%(s0)s", "action": "排除", "note": "同じ作業への2つ目の変更"},
+    {"id": "%(s2)s", "action": "魔法", "note": "決まっていない変更区分"}
+  ]},
+  "take": {"summary": "OCRで読み取る", "needs": ["OCRサービス", "", 5], "changes": [
+    {"id": "%(s0)s", "action": "自動化", "name": "読み取り結果を確認する", "minutes": 1, "tool": "OCR", "media": "のろし", "note": "OCRで読み取る", "issue_resolved": true},
+    {"id": "%(s1)s", "action": "排除", "name": "無視される名前", "note": "不要になる"}
+  ]},
+  "matsu": {"summary": "すべてなくす", "needs": [], "changes": [%(every)s]},
+  "極上": {"summary": "知らない案", "changes": [{"id": "%(s0)s", "action": "排除", "note": "x"}]}
+}}
+```""" % {"s0": s0["id"], "s1": s1["id"], "s2": s2["id"], "every": every}
         fake = _configure(monkeypatch, answer)
         r = c.post(f"/api/businesses/{bid}/tobe/suggest", headers=TANAKA)
         assert r.status_code == 200, r.text
-        out = r.json()
-        assert out["summary"] == "入力を自動化する"
+        plans = r.json()["plans"]
+        # すべての作業をなくす案（松）と、知らない案は入れない
+        assert list(plans) == ["ume", "take"]
+        ume, take = plans["ume"], plans["take"]
+        assert ume["summary"] == "様式をそろえる" and ume["needs"] == ["入力様式の統一ルール"]
         # AS-ISにない作業・同じ作業への2つ目・決まっていない変更区分は捨てる
-        assert [(x["id"], x["action"]) for x in out["changes"]] == [(s0["id"], "自動化"), (s1["id"], "排除")]
-        first = out["changes"][0]
-        assert first["tool"] == "会計システム" and first["media"] == "システム連携" and first["issue_resolved"] is True
-        assert first["minutes"] <= max(s0["minutes"], 0) or s0["minutes"] == 0  # 変更前より増やさない
-        assert out["changes"][1]["name"] is None  # 排除では作業名を使わない
-        # AIにはAS-ISの作業と、企業の道具の候補が渡る
-        last = fake.calls[0]["messages"][-1]["content"]
+        assert [(x["id"], x["action"]) for x in ume["changes"]] == [(s0["id"], "簡素化")]
+        assert ume["changes"][0]["tool"] == "共有Excel" and ume["changes"][0]["media"] == "チャット"
+        assert ume["changes"][0]["minutes"] <= s0["minutes"] or s0["minutes"] == 0  # 変更前より増やさない
+        assert take["needs"] == ["OCRサービス", "5"]
+        assert [(x["id"], x["action"]) for x in take["changes"]] == [(s0["id"], "自動化"), (s1["id"], "排除")]
+        assert take["changes"][0]["issue_resolved"] is True and take["changes"][0]["media"] is None  # 決まっていない渡し方は使わない
+        assert take["changes"][1]["name"] is None  # 排除では作業名を使わない
+        # AIには、3案の分け方・AS-ISの作業・企業の道具の候補が渡る
+        msgs = fake.calls[0]["messages"]
+        assert "梅" in msgs[0]["content"] and "RPA" in msgs[0]["content"]
+        last = msgs[-1]["content"]
         assert s0["id"] in last and s0["name"] in last and "道具の候補" in last and "<flow>" in last
         # 保存はしない
-        assert c.get(f"/api/businesses/{bid}/flows", headers=ADMIN).json()["tobe"] is None
+        assert c.get(f"/api/businesses/{bid}/flows", headers=ADMIN).json()["plans"] == {}
         # 他社の業務は 404
         other = c.get("/api/companies/2/businesses", headers=ADMIN).json()[0]["id"]
         assert c.post(f"/api/businesses/{other}/tobe/suggest", headers=TANAKA).status_code == 404
@@ -130,12 +145,36 @@ def test_tobe_suggest_errors(monkeypatch):
         # 設定がないとき
         monkeypatch.setattr(settings, "azure_openai_endpoint", "")
         assert c.post(f"/api/businesses/{bid}/tobe/suggest", headers=ADMIN).status_code == 503
-        # 読み取れない返事・使える変更が1つもない返事
+        # 読み取れない返事・使える変更が1つもない返事・以前の形（1案だけ）の返事
         _configure(monkeypatch, "改善案は次のとおりです。まず入力を減らします。")
         assert c.post(f"/api/businesses/{bid}/tobe/suggest", headers=ADMIN).status_code == 502
-        _configure(monkeypatch, '{"summary": "x", "changes": [{"id": "S999", "action": "排除"}]}')
+        _configure(monkeypatch, '{"plans": {"ume": {"summary": "x", "changes": [{"id": "S999", "action": "排除"}]}}}')
+        assert c.post(f"/api/businesses/{bid}/tobe/suggest", headers=ADMIN).status_code == 502
+        _configure(monkeypatch, '{"summary": "x", "changes": [{"id": "S01", "action": "排除"}]}')
         assert c.post(f"/api/businesses/{bid}/tobe/suggest", headers=ADMIN).status_code == 502
         # AS-ISがまだない業務
         new = c.post("/api/companies/1/businesses", headers=ADMIN, json={"name": "AS-ISなし"}).json()["id"]
         assert c.post(f"/api/businesses/{new}/tobe/suggest", headers=ADMIN).status_code == 422
         c.delete(f"/api/businesses/{new}", headers=ADMIN)
+
+
+def test_example_plans_are_valid():
+    """AIに見せる見本（3案）が、決まった形に合っていて、削減時間が 梅＜竹＜松 になっていること"""
+    import json
+
+    from app.schemas import Flow, Step
+
+    rows = [ln.split("｜") for ln in ai.TOBE_EXAMPLE_INPUT.split("<flow>\n")[1].split("\n</flow>")[0].splitlines()]
+    flow = Flow(steps=[Step(id=r[0], lane=r[1][3:], name=r[2][3:], tool=r[3][3:], minutes=int(r[4][:-1])) for r in rows])
+    plans = ai.parse_tobe(ai.TOBE_EXAMPLE_OUTPUT, flow)["plans"]
+    raw = json.loads(ai.TOBE_EXAMPLE_OUTPUT)["plans"]
+    assert list(plans) == ["ume", "take", "matsu"]
+    saved = {}
+    for key, p in plans.items():
+        assert len(p["changes"]) == len(raw[key]["changes"])  # 見本の変更は1つも捨てられない
+        assert p["summary"] and 1 <= len(p["needs"]) <= 3
+        assert all(len(ch["note"]) <= 80 for ch in p["changes"])
+        by_id = {st.id: st.minutes for st in flow.steps}
+        saved[key] = sum(by_id[ch["id"]] - (0 if ch["action"] == "排除" else ch.get("minutes", by_id[ch["id"]])) for ch in p["changes"])
+    assert 0 < saved["ume"] < saved["take"] < saved["matsu"]
+    assert all(ch["action"] != "自動化" for ch in plans["ume"]["changes"])  # 梅ではツールを入れない

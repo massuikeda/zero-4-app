@@ -12,6 +12,7 @@ from . import ai, render
 from .auth import can_see_company, current_user, find_user, get_business_or_404, require_admin
 from .config import settings
 from .db import Business, Company, FlowDoc, Resource, SessionLocal, User, get_db, init_db, now
+from .schemas import PLANS, AdoptIn, plan_kind  # noqa: I001
 from .schemas import (
     AssignIn, BusinessIn, BusinessNotesIn, BusinessOut, CompanyIn, CompanyOut, Flow, FlowDocOut, FlowKind,
     FlowSaveIn, FlowsOut, HearingFormatIn, HearingFormatOut, Me, RenderIn, ResourceIn, ResourceOut, TobeSuggestOut,
@@ -34,28 +35,42 @@ app = FastAPI(title="業務フロー管理 API", version="0.1.0", lifespan=lifes
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
 
 
+PLAN_LABEL = {"ume": "梅", "take": "竹", "matsu": "松"}
+
+
 # ---------- 共通 ----------
+def _plan_flows(b: Business) -> dict[str, FlowDoc]:
+    """作成済みのTO-BEの案（ume / take / matsu → FlowDoc）"""
+    by_kind = {f.kind: f for f in b.flows}
+    return {p: by_kind[plan_kind(p)] for p in PLANS if plan_kind(p) in by_kind}
+
+
 def _status(b: Business) -> str:
-    kinds = {f.kind for f in b.flows}
-    return "TO-BE作成済" if "tobe" in kinds else "AS-IS作成済" if "asis" in kinds else "未着手"
+    if _plan_flows(b):
+        return "TO-BE作成済"
+    return "AS-IS作成済" if any(f.kind == "asis" for f in b.flows) else "未着手"
 
 
-def _saved_minutes(b: Business) -> int | None:
-    """削減時間（1回あたり・分）。比較タブの「削減時間」と同じ計算（作業時間の合計の差）"""
-    flows = {f.kind: f for f in b.flows}
-    if "asis" not in flows or "tobe" not in flows:
-        return None
+def _saved_by_plan(b: Business) -> dict[str, int]:
+    """案ごとの削減時間（1回あたり・分）。比較タブの「削減時間」と同じ計算（作業時間の合計の差）"""
+    asis = next((f for f in b.flows if f.kind == "asis"), None)
+    if not asis:
+        return {}
 
     def total(f: FlowDoc) -> int:
         return sum(int(s.get("minutes") or 0) for s in (f.data or {}).get("steps", []))
 
-    return total(flows["asis"]) - total(flows["tobe"])
+    return {p: total(asis) - total(f) for p, f in _plan_flows(b).items()}
 
 
 def _business_out(b: Business, user: User) -> BusinessOut:
     out = BusinessOut.model_validate(b)
     out.status = _status(b)
-    out.saved_minutes = _saved_minutes(b)
+    out.saved_by_plan = _saved_by_plan(b)
+    # 一覧に出すのは、採用する案の削減時間。未選択なら竹
+    shown = b.adopted_plan if b.adopted_plan in PLANS else "take"
+    if shown in out.saved_by_plan:
+        out.saved_plan, out.saved_minutes = shown, out.saved_by_plan[shown]
     out.assignee_ids = [u.id for u in b.assignees] if user.role == "admin" else []
     return out
 
@@ -244,7 +259,7 @@ def format_hearing(bid: int, body: HearingFormatIn, user: User = Depends(current
 
 @app.post("/api/businesses/{bid}/tobe/suggest", response_model=TobeSuggestOut)
 def suggest_tobe(bid: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """保存済みのAS-ISから、Azure OpenAI で TO-BE の改善案（どの作業をどう変えるか）を作る。
+    """保存済みのAS-ISから、Azure OpenAI で TO-BE の改善案を梅・竹・松の3つ作る（どの作業をどう変えるか）。
     保存はしない。画面がAS-ISに当てはめて図にし、利用者が確認してから保存する"""
     b = get_business_or_404(db, user, bid)
     asis = {f.kind: f for f in b.flows}.get("asis")
@@ -283,10 +298,14 @@ def _flows(b: Business) -> dict[str, FlowDoc]:
 
 @app.get("/api/businesses/{bid}/flows", response_model=FlowsOut)
 def get_flows(bid: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    fl = _flows(get_business_or_404(db, user, bid))
-    a, t = fl.get("asis"), fl.get("tobe")
-    cmp = render.compare(Flow.model_validate(a.data), Flow.model_validate(t.data)) if a and t else None
-    return FlowsOut(asis=_flow_doc_out(a), tobe=_flow_doc_out(t), comparison=cmp)
+    b = get_business_or_404(db, user, bid)
+    a = _flows(b).get("asis")
+    plans = _plan_flows(b)
+    comparisons = {}
+    if a:
+        asis = Flow.model_validate(a.data)
+        comparisons = {p: render.compare(asis, Flow.model_validate(f.data)) for p, f in plans.items()}
+    return FlowsOut(asis=_flow_doc_out(a), plans={p: _flow_doc_out(f) for p, f in plans.items()}, comparisons=comparisons)
 
 
 @app.put("/api/businesses/{bid}/flows/{kind}", response_model=FlowDocOut)
@@ -312,23 +331,38 @@ def save_flow(bid: int, kind: FlowKind, body: FlowSaveIn,
     return _flow_doc_out(f)
 
 
-@app.post("/api/businesses/{bid}/flows/tobe/copy-from-asis", response_model=FlowDocOut)
-def copy_asis_to_tobe(bid: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+@app.post("/api/businesses/{bid}/flows/{kind}/copy-from-asis", response_model=FlowDocOut)
+def copy_asis_to_tobe(bid: int, kind: FlowKind, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """AS-ISをコピーして、TO-BEの案（tobe_ume / tobe_take / tobe_matsu）を作る"""
+    if kind == "asis":
+        raise HTTPException(422, "TO-BEの案を指定してください")
     b = get_business_or_404(db, user, bid)
     fl = _flows(b)
     if "asis" not in fl:
         raise HTTPException(422, "先にAS-ISを作成してください")
-    if "tobe" in fl:
-        raise HTTPException(409, "TO-BEは既にあります")
+    if kind in fl:
+        raise HTTPException(409, "この案のTO-BEは既にあります")
     data = Flow.model_validate(fl["asis"].data)
     for s in data.steps:
         s.change = None
         s.note = ""
-    f = FlowDoc(business_id=b.id, kind="tobe", data=data.model_dump(), version=1, updated_by=user.name)
+    f = FlowDoc(business_id=b.id, kind=kind, data=data.model_dump(), version=1, updated_by=user.name)
     db.add(f)
     b.updated_at = now()
     db.commit()
     return _flow_doc_out(f)
+
+
+@app.put("/api/businesses/{bid}/adopted", response_model=BusinessOut)
+def set_adopted_plan(bid: int, body: AdoptIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """採用するTO-BEの案を選ぶ（一覧の削減時間に使う）。作成済みの案だけ選べる。plan=null で未選択に戻す"""
+    b = get_business_or_404(db, user, bid)
+    if body.plan and body.plan not in _plan_flows(b):
+        raise HTTPException(422, "この案はまだ作成されていません")
+    b.adopted_plan = body.plan or ""
+    b.updated_at = now()
+    db.commit()
+    return _business_out(b, user)
 
 
 @app.get("/api/businesses/{bid}/flows/{kind}/drawio")
@@ -337,7 +371,7 @@ def export_drawio(bid: int, kind: FlowKind, user: User = Depends(current_user), 
     f = _flows(b).get(kind)
     if not f:
         raise HTTPException(404, "フローがありません")
-    label = "AS-IS" if kind == "asis" else "TO-BE"
+    label = "AS-IS" if kind == "asis" else f"TO-BE（{PLAN_LABEL[kind.removeprefix('tobe_')]}）"
     xml = render.to_drawio(Flow.model_validate(f.data), f"{b.name} {label}")
     return Response(xml, media_type="application/xml")
 

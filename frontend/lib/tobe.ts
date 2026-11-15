@@ -17,9 +17,17 @@ export interface TobeResult {
   applied: number;
 }
 
-export function applyTobeChanges(asis: Flow, changes: TobeChange[], resources: Resource[] = []): TobeResult {
+export function applyTobeChanges(
+  asis: Flow,
+  changes: TobeChange[],
+  resources: Resource[] = [],
+  /** この案の説明（図と一緒に保存する） */
+  info: { summary?: string; needs?: string[] } = {},
+): TobeResult {
   // AS-ISをコピー（「AS-ISをコピーして作成」と同じく、変更区分と補足は空から始める）
   let flow: Flow = normalize({
+    summary: info.summary ?? "",
+    needs: info.needs ?? [],
     lanes: [...asis.lanes],
     steps: asis.steps.map((s) => ({ ...s, change: null, note: "", next: [...s.next], next_media: [...s.next_media] })),
   });
@@ -31,6 +39,8 @@ export function applyTobeChanges(asis: Flow, changes: TobeChange[], resources: R
     if (!cur) continue; // すでに消した作業・AS-ISにない作業
     if (c.action === "排除") {
       flow = removeStep(flow, c.id);
+      // 図から消える作業なので、なくす理由は案のほうに残す（比較タブに出す）
+      if (c.note) flow = { ...flow, removed_notes: { ...flow.removed_notes, [c.id]: c.note } };
     } else {
       const patch: Partial<Step> = { change: c.action, note: c.note ?? "" };
       if (c.name) patch.name = c.name;

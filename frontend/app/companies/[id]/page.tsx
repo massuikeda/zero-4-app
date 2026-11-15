@@ -8,7 +8,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { formatEmployees } from "@/lib/company";
 import { formatMinutes } from "@/lib/flow";
 import { api } from "@/lib/api";
-import { RESOURCE_KINDS, type Business, type Company, type Resource, type ResourceKind, type UserRow } from "@/lib/types";
+import { PLAN_LABEL, RESOURCE_KINDS, type Business, type Company, type Resource, type ResourceKind, type UserRow } from "@/lib/types";
 
 type Tab = "businesses" | "resources" | "users";
 
@@ -159,6 +159,12 @@ function BusinessList({
                     <span className={b.saved_minutes < 0 ? "saved minus" : "saved"}>
                       {b.saved_minutes < 0 ? "−" : ""}
                       {formatMinutes(Math.abs(b.saved_minutes))}
+                      {b.saved_plan && (
+                        <em className="plan-of" title={b.adopted_plan ? "採用する案" : "採用する案が未選択のため、竹の案を表示しています"}>
+                          {PLAN_LABEL[b.saved_plan]}
+                          {b.adopted_plan ? "・採用" : ""}
+                        </em>
+                      )}
                     </span>
                   )}
                 </td>

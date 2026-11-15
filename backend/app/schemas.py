@@ -11,7 +11,15 @@ StepType = Literal["作業", "判断", "システム処理", "帳票", "待ち"]
 # TO-BE の変更区分（ECRS + 自動化 + 新規）
 ChangeAction = Literal["排除", "統合", "入替", "簡素化", "自動化", "新規"]
 ResourceKind = Literal["部署", "担当者", "取引先", "システム", "帳票"]
-FlowKind = Literal["asis", "tobe"]
+# TO-BE は松竹梅の3案（梅＝やり方の見直しだけ／竹＝手ごろなツールの導入／松＝RPA・システム連携で自動化）
+Plan = Literal["ume", "take", "matsu"]
+PLANS: tuple[str, ...] = ("ume", "take", "matsu")
+FlowKind = Literal["asis", "tobe_ume", "tobe_take", "tobe_matsu"]
+
+
+def plan_kind(plan: str) -> str:
+    """案（ume/take/matsu）→ flows.kind の値（tobe_ume など）"""
+    return f"tobe_{plan}"
 
 
 # ---------- フローのフォーマット ----------
@@ -41,6 +49,11 @@ class Step(BaseModel):
 class Flow(BaseModel):
     lanes: list[str] = Field(default_factory=list)
     steps: list[Step] = Field(default_factory=list)
+    # TO-BEの案の説明（AS-ISでは使わない）
+    summary: str = Field("", max_length=300)                 # この案の要約
+    needs: list[str] = Field(default_factory=list, max_length=10)  # 導入・準備が必要なもの
+    # なくした作業（排除）の理由。作業ID → 何を使って、どうなくすか（図から消える作業なので、ここに残す）
+    removed_notes: dict[str, str] = Field(default_factory=dict)
 
 
 class Comparison(BaseModel):
@@ -115,7 +128,11 @@ class BusinessOut(_Out):
     field_view: str
     updated_at: datetime
     status: str = "未着手"
-    # 削減時間（1回あたり・分）＝ AS-ISの合計時間 − TO-BEの合計時間。TO-BEがまだなければ None
+    adopted_plan: str = ""  # 採用する案（ume / take / matsu。未選択は空）
+    # 削減時間（1回あたり・分）＝ AS-ISの合計時間 − TO-BEの合計時間。案ごと（作成済みの案だけ入る）
+    saved_by_plan: dict[str, int] = {}
+    # 一覧に出す削減時間：採用する案のもの。未選択なら竹。その案がまだなければ None
+    saved_plan: Optional[str] = None
     saved_minutes: Optional[int] = None
     assignee_ids: list[int] = []
 
@@ -130,8 +147,8 @@ class FlowDocOut(BaseModel):
 
 class FlowsOut(BaseModel):
     asis: Optional[FlowDocOut]
-    tobe: Optional[FlowDocOut]
-    comparison: Optional[Comparison]
+    plans: dict[str, FlowDocOut]          # 作成済みのTO-BEの案（ume / take / matsu）
+    comparisons: dict[str, Comparison]    # 案ごとの、AS-ISとの比較
 
 
 # ---------- 入力 ----------
@@ -197,13 +214,22 @@ class TobeChange(BaseModel):
     minutes: Optional[int] = Field(None, ge=0, le=100000)  # 変更後の所要時間（分）
     tool: Optional[str] = Field(None, max_length=60)   # 変更後の道具
     media: Optional[str] = Field(None, max_length=20)  # 変更後の、次の作業への渡し方
-    note: str = Field("", max_length=200)              # 何をどう変えるか・なぜか
+    note: str = Field("", max_length=200)              # 何を使って、何を、どう変えるか
     issue_resolved: bool = False  # この変更で、その作業のボトルネックが解消するか
 
 
-class TobeSuggestOut(BaseModel):
-    summary: str = ""             # 改善案の要約
+class TobePlanOut(BaseModel):
+    summary: str = ""             # この案の要約
+    needs: list[str] = []         # 導入・準備が必要なもの
     changes: list[TobeChange]
+
+
+class TobeSuggestOut(BaseModel):
+    plans: dict[str, TobePlanOut]  # ume / take / matsu（AIが出せた案だけ入る）
+
+
+class AdoptIn(BaseModel):
+    plan: Optional[Plan] = None   # 採用する案。None で未選択に戻す
 
 
 class AssignIn(BaseModel):

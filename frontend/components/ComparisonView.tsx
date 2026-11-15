@@ -66,7 +66,9 @@ export function ComparisonView({ asis, tobe, resources, frequency, execView, fie
                   <td>{s.lane}</td>
                   <td>{s.name || "（名前なし）"}</td>
                   <td className="muted">―（なくなる）</td>
-                  <td className="muted">TO-BEでなくなった作業</td>
+                  <td className={tobe.removed_notes?.[s.id] ? "" : "muted"}>
+                    {tobe.removed_notes?.[s.id] || "TO-BEでなくなった作業"}
+                  </td>
                   <SavedCell min={savedOf(s.minutes, 0)} />
                 </tr>
               ))}

@@ -7,14 +7,16 @@ erDiagram
     companies ||--o{ resources : "持つ"
     companies ||--o{ businesses : "持つ"
     companies |o--o{ users : "所属（管理者は所属なし）"
-    businesses ||--o{ flows : "AS-IS・TO-BE（最大2件）"
+    businesses ||--o{ flows : "AS-IS と TO-BE 3案（最大4件）"
     businesses ||--o{ assignments : "割り当て"
     users ||--o{ assignments : "割り当て"
 
     companies {
         int id PK
         string name "企業名"
-        text note "メモ（業種・規模など）"
+        string industry "業種"
+        int employees "従業員数（未入力は空）"
+        text note "メモ"
         datetime created_at "作成日時"
     }
     resources {
@@ -39,15 +41,17 @@ erDiagram
         string department "部署"
         string frequency "頻度"
         text description "概要"
-        text hearing_notes "ヒアリングメモ"
+        text hearing_raw "ヒアリングボックス（聞いたままの記録）"
+        text hearing_notes "AIが整えたテキスト（AS-ISの元）"
         text exec_view "経営者の認識"
         text field_view "現場の実態"
+        string adopted_plan "採用するTO-BEの案（ume・take・matsu。未選択は空）"
         datetime updated_at "更新日時"
     }
     flows {
         int id PK
         int business_id FK "業務（kindと組で一意）"
-        string kind "asis・tobe"
+        string kind "asis・tobe_ume・tobe_take・tobe_matsu"
         json data "図の中身（列・作業・矢印）"
         int version "同時編集の上書き防止"
         datetime updated_at "更新日時"
@@ -67,11 +71,14 @@ erDiagram
 | resources | 企業ごとのリソース（部署・担当者・取引先・システム・帳票）。図の列や道具の候補になる |
 | users | ログインする人。管理者（admin）は企業に所属しない。担当者（member）はどこか1社に所属 |
 | businesses | 業務。ヒアリングメモ・経営者の認識・現場の実態もここに入る |
-| flows | 業務フロー本体。1つの業務に AS-IS と TO-BE が最大1件ずつ（business_id と kind の組で一意） |
+| flows | 業務フロー本体。1つの業務に AS-IS が1件と、TO-BE が梅・竹・松の3案（各最大1件）。business_id と kind の組で一意 |
 | assignments | どの担当者がどの業務を見られる・編集できるか（多対多） |
 
 - 削除のルール：企業を消すと、その企業のリソース・業務・担当者・フロー・割り当てもまとめて消えます（ON DELETE CASCADE）
 - `flows.version` は保存のたびに1増え、古い画面からの上書きを防ぎます
+- TO-BE は松竹梅の3案です（`kind` が `tobe_ume`＝梅：やり方の見直しだけ／`tobe_take`＝竹：手ごろなツールの導入／`tobe_matsu`＝松：RPA・システム連携で自動化）。1案だけだったころの `kind = tobe` の行は使いません（残っていても画面には出ません）
+- `businesses.adopted_plan` は「採用する案」です。業務一覧の削減時間に使います（未選択なら竹）
+- 削減時間は保存していません。AS-IS と TO-BE の作業時間の合計の差を、表示のたびに計算します
 
 ## flows.data の中身（JSON）
 
@@ -79,6 +86,9 @@ erDiagram
 
 ```
 {
+  "summary": "…",                … TO-BEの案の要約（AS-ISでは使わない）
+  "needs": ["RPAツール"],         … TO-BEの案で、導入・準備が必要なもの
+  "removed_notes": {"S05": "…"},  … TO-BEの案で、なくした作業（排除）の理由（作業ID → 理由）
   "lanes": ["取引先", "営業部（受注）", "倉庫（出荷）"],     … 列（担当）の並び
   "steps": [
     {

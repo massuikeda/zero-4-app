@@ -10,10 +10,17 @@ import { ApiError, api } from "@/lib/api";
 import { normalize } from "@/lib/flow";
 import { parseHearing } from "@/lib/hearing";
 import { applyTobeChanges } from "@/lib/tobe";
-import { emptyFlow, type Business, type Company, type Flow, type FlowDoc, type FlowKind, type Resource } from "@/lib/types";
+import {
+  FLOW_KINDS, PLANS, PLAN_DESC, PLAN_LABEL, emptyFlow, planKind,
+  type Business, type Company, type Flow, type FlowDoc, type FlowKind, type Plan, type Resource, type TobeKind,
+} from "@/lib/types";
 
 type Tab = "notes" | "asis" | "tobe" | "compare";
-const LABEL: Record<FlowKind, string> = { asis: "AS-IS", tobe: "TO-BE" };
+const LABEL: Record<FlowKind, string> = {
+  asis: "AS-IS", tobe_ume: "TO-BE（梅）", tobe_take: "TO-BE（竹）", tobe_matsu: "TO-BE（松）",
+};
+/** 4つの図（AS-IS と、TO-BEの梅・竹・松）それぞれに同じ初期値を持たせる */
+const forEachKind = <T,>(make: () => T) => Object.fromEntries(FLOW_KINDS.map((k) => [k, make()])) as Record<FlowKind, T>;
 
 interface Draft {
   data: Flow;
@@ -44,18 +51,18 @@ export default function BusinessPage() {
   const [business, setBusiness] = useState<Business | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
   const [resources, setResources] = useState<Resource[]>([]);
-  const [drafts, setDrafts] = useState<Record<FlowKind, Draft | null>>({ asis: null, tobe: null });
+  const [drafts, setDrafts] = useState<Record<FlowKind, Draft | null>>(() => forEachKind(() => null));
+  // TO-BEタブ・比較タブで見ている案（梅・竹・松）
+  const [plan, setPlan] = useState<Plan>("take");
+  const tobeKind = planKind(plan);
   const [notes, setNotes] = useState({ hearing_raw: "", hearing_notes: "", exec_view: "", field_view: "", dirty: false });
   // Azure OpenAI（ヒアリングボックス → 決まった形式）
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
-  // AIが作ったTO-BEの要約（確認して保存するまで、TO-BEタブの上に出しておく）
-  const [tobeAiNote, setTobeAiNote] = useState<string | null>(null);
   // 元に戻す（Ctrl+Z）用の履歴。連続入力（文字の打鍵など）はまとめて1回分にする
-  const history = useRef<Record<FlowKind, { stack: Flow[]; at: number; merge: boolean }>>({
-    asis: { stack: [], at: 0, merge: false },
-    tobe: { stack: [], at: 0, merge: false },
-  });
+  const history = useRef<Record<FlowKind, { stack: Flow[]; at: number; merge: boolean }>>(
+    forEachKind(() => ({ stack: [] as Flow[], at: 0, merge: false })),
+  );
   const [, setHistoryTick] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [regenOffer, setRegenOffer] = useState(false);
@@ -76,13 +83,20 @@ export default function BusinessPage() {
       setCompany(c);
       setResources(r);
       setNotes({ hearing_raw: b.hearing_raw, hearing_notes: b.hearing_notes, exec_view: b.exec_view, field_view: b.field_view, dirty: false });
-      setDrafts({ asis: fromDoc(f.asis), tobe: fromDoc(f.tobe) });
+      setDrafts({
+        asis: fromDoc(f.asis),
+        tobe_ume: fromDoc(f.plans.ume ?? null),
+        tobe_take: fromDoc(f.plans.take ?? null),
+        tobe_matsu: fromDoc(f.plans.matsu ?? null),
+      });
       // 開いたときのタブ：AS-ISがまだなければヒアリング、あればAS-IS。
       // 前に開いていた別の業務のタブが残らないよう、どちらの場合も決める（保存後の読み直しでは変えない）
       if (openedBid.current !== bid) {
         openedBid.current = bid;
-        setTobeAiNote(null);
         setTab(f.asis ? "asis" : "notes");
+        // 最初に見せる案：採用する案 → 作成済みの案（竹を優先）→ 竹
+        const made = (["take", "ume", "matsu"] as const).filter((p) => f.plans[p]);
+        setPlan(b.adopted_plan && f.plans[b.adopted_plan] ? b.adopted_plan : made[0] ?? "take");
       }
       api.config().then((x) => setAiEnabled(!!x.ai_enabled), () => setAiEnabled(false));
     } catch (e) {
@@ -98,7 +112,7 @@ export default function BusinessPage() {
     };
   }, [me, load]);
 
-  const anyDirty = notes.dirty || !!drafts.asis?.dirty || !!drafts.tobe?.dirty;
+  const anyDirty = notes.dirty || FLOW_KINDS.some((k) => drafts[k]?.dirty);
   useEffect(() => {
     if (!anyDirty) return;
     const h = (e: BeforeUnloadEvent) => e.preventDefault();
@@ -138,7 +152,7 @@ export default function BusinessPage() {
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
         e.preventDefault();
-        undo(tab);
+        undo(tab === "asis" ? "asis" : tobeKind);
       }
     };
     window.addEventListener("keydown", key);
@@ -152,7 +166,6 @@ export default function BusinessPage() {
     try {
       const doc = await api.saveFlow(bid, kind, d.data, d.version);
       setDrafts((x) => ({ ...x, [kind]: fromDoc(doc) }));
-      if (kind === "tobe") setTobeAiNote(null);
       flash("ok", `${LABEL[kind]}を保存しました`);
     } catch (e) {
       flash("err", e instanceof ApiError && e.status === 409 ? `${e.message}（あなたの変更はまだ画面に残っています）` : String(e instanceof Error ? e.message : e));
@@ -211,29 +224,84 @@ export default function BusinessPage() {
     }
   };
 
+  /** 未保存の案（梅・竹・松）をまとめて保存する */
+  const saveAllPlans = async () => {
+    setBusy(true);
+    try {
+      const done: string[] = [];
+      for (const p of PLANS) {
+        const k = planKind(p);
+        const d = drafts[k];
+        if (!d?.dirty) continue;
+        const doc = await api.saveFlow(bid, k, d.data, d.version);
+        setDrafts((x) => ({ ...x, [k]: fromDoc(doc) }));
+        done.push(PLAN_LABEL[p]);
+      }
+      if (done.length) flash("ok", `TO-BE（${done.join("・")}）を保存しました`);
+      setBusiness(await api.business(bid)); // 状況・削減時間を読み直す
+    } catch (e) {
+      flash("err", e instanceof ApiError && e.status === 409 ? `${e.message}（あなたの変更はまだ画面に残っています）` : String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 採用する案を選ぶ（業務一覧の削減時間に使う）。同じ案をもう一度選ぶと未選択に戻す */
+  const adopt = async (p: Plan) => {
+    if (!business) return;
+    try {
+      setBusiness(await api.setAdopted(bid, business.adopted_plan === p ? null : p));
+    } catch (e) {
+      flash("err", e instanceof Error ? e.message : String(e));
+    }
+  };
+
   /**
-   * AIでTO-BEを作る：保存済みのAS-IS → Azure OpenAI が「どの作業をどう変えるか」を出す → 決まったルールでAS-ISに当てはめて図にする。
-   * できた図は保存前の下書き。確認・手直ししてから「保存」で確定する（すでにTO-BEがあれば「元に戻す」で戻せる）
+   * AIでTO-BEを作る：保存済みのAS-IS → Azure OpenAI が梅・竹・松それぞれの「どの作業をどう変えるか」を出す
+   * → 決まったルールでAS-ISに当てはめて、3つの図にする。
+   * できた図は保存前の下書き。確認・手直ししてから保存で確定する（すでにある案は「元に戻す」で戻せる）
    */
   const createTobeWithAi = async () => {
     const asis = drafts.asis;
     if (!asis?.doc) return flash("err", "先にAS-ISを作成して保存してください");
     if (asis.dirty) return flash("err", "AS-ISに未保存の変更があります。先にAS-ISを保存してください");
-    if (drafts.tobe && !confirm("いまのTO-BEを、AIの改善案で作り直しますか？（保存するまでは「元に戻す」で戻せます）")) return;
+    const existing = PLANS.filter((p) => drafts[planKind(p)]);
+    if (
+      existing.length &&
+      !confirm(`いまのTO-BE（${existing.map((p) => PLAN_LABEL[p]).join("・")}）を、AIの改善案で作り直しますか？（保存するまでは「元に戻す」で戻せます）`)
+    ) {
+      return;
+    }
     setAiBusy(true);
-    setTobeAiNote(null);
     try {
       const s = await api.suggestTobe(bid);
-      const r = applyTobeChanges(asis.doc.data, s.changes, resources);
-      if (r.applied === 0) throw new Error("AIの改善案をAS-ISに当てはめられませんでした。もう一度お試しください");
-      if (drafts.tobe) {
-        edit("tobe", r.flow);
-      } else {
-        setDrafts((x) => ({ ...x, tobe: { data: r.flow, version: 0, dirty: true, doc: null } }));
+      const made: { plan: Plan; kind: TobeKind; flow: Flow }[] = [];
+      for (const p of PLANS) {
+        const sp = s.plans[p];
+        if (!sp) continue;
+        const r = applyTobeChanges(asis.doc.data, sp.changes, resources, { summary: sp.summary, needs: sp.needs });
+        if (r.applied > 0) made.push({ plan: p, kind: planKind(p), flow: r.flow });
       }
-      const detail = Object.entries(r.counts).map(([k, n]) => `${k}${n}件`).join("・");
-      setTobeAiNote(`${s.summary ? `${s.summary}　` : ""}（${detail}）`);
+      if (made.length === 0) throw new Error("AIの改善案をAS-ISに当てはめられませんでした。もう一度お試しください");
+      // すでにある案は、「元に戻す」で戻せるように履歴へ入れる
+      for (const m of made) {
+        const prev = drafts[m.kind]?.data;
+        const h = history.current[m.kind];
+        if (prev) h.stack.push(prev);
+        h.at = 0;
+        h.merge = false;
+      }
+      setHistoryTick((n) => n + 1);
+      setDrafts((d) => {
+        const out = { ...d };
+        for (const m of made) out[m.kind] = { ...(d[m.kind] ?? { version: 0, doc: null }), data: m.flow, dirty: true };
+        return out;
+      });
+      if (!made.some((m) => m.plan === plan)) setPlan(made[0].plan);
       setTab("tobe");
+      const names = made.map((m) => PLAN_LABEL[m.plan]).join("・");
+      const missing = PLANS.filter((p) => !made.some((m) => m.plan === p)).map((p) => PLAN_LABEL[p]);
+      flash("ok", `AIが${names}の案を作成しました。内容を確認して保存してください${missing.length ? `（${missing.join("・")}は作成できませんでした）` : ""}`);
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
     } finally {
@@ -241,19 +309,22 @@ export default function BusinessPage() {
     }
   };
 
+  /** いま見ている案（梅・竹・松）を、AS-ISのコピーか白紙から作る */
   const startTobe = async (fromAsis: boolean) => {
+    const kind = tobeKind;
     if (fromAsis) {
       if (drafts.asis?.dirty) return flash("err", "先にAS-ISを保存してください");
       try {
-        const doc = await api.copyAsisToTobe(bid);
-        setDrafts((x) => ({ ...x, tobe: fromDoc(doc) }));
+        const doc = await api.copyAsisToTobe(bid, kind);
+        setDrafts((x) => ({ ...x, [kind]: fromDoc(doc) }));
+        setBusiness(await api.business(bid));
       } catch (e) {
         flash("err", e instanceof Error ? e.message : String(e));
       }
     } else {
       setDrafts((x) => ({
         ...x,
-        tobe: { data: { lanes: x.asis?.data.lanes ?? [], steps: [] }, version: 0, dirty: true, doc: null },
+        [kind]: { data: { lanes: x.asis?.data.lanes ?? [], steps: [] }, version: 0, dirty: true, doc: null },
       }));
     }
   };
@@ -304,17 +375,45 @@ export default function BusinessPage() {
   /** 1件あたりの時間＝各作業の所要時間の合計（作業が無ければ null） */
   const total = (d: Draft | null) =>
     d && d.data.steps.length ? d.data.steps.reduce((n, st) => n + (st.minutes || 0), 0) : null;
-  const perCase = { asis: total(drafts.asis), tobe: total(drafts.tobe) };
+  // TO-BE側は、採用する案（未選択なら、いま見ている案）の時間を出す
+  const shownPlan: Plan = business.adopted_plan || plan;
+  const perCase = { asis: total(drafts.asis), tobe: total(drafts[planKind(shownPlan)]) };
+  const dirtyPlans = PLANS.filter((p) => drafts[planKind(p)]?.dirty);
+
+  /** 案の切り替え（梅・竹・松）。案ごとの状態（未作成・削減時間・未保存・採用）も出す */
+  const planPicker = (
+    <div className="plan-tabs" role="tablist" aria-label="TO-BEの案">
+      {PLANS.map((p) => {
+        const d = drafts[planKind(p)];
+        const t = total(d);
+        const saved = perCase.asis !== null && t !== null ? perCase.asis - t : null;
+        return (
+          <button key={p} role="tab" aria-selected={plan === p} className={`plan-tab ${p}${plan === p ? " on" : ""}`} onClick={() => setPlan(p)}>
+            <span className="plan-name">
+              {PLAN_LABEL[p]}
+              {business.adopted_plan === p && <em className="plan-adopted">採用</em>}
+              {d?.dirty && <span className="dot" title="未保存" />}
+            </span>
+            <span className="plan-desc">{PLAN_DESC[p]}</span>
+            <span className={d ? "plan-state" : "plan-state none"}>
+              {!d ? "未作成" : saved === null ? "作成済" : `削減 ${saved < 0 ? "−" : ""}${fmtMin(Math.abs(saved))}／回`}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
 
   const tabs: [Tab, string, boolean][] = [
     ["notes", "ヒアリング", notes.dirty],
     ["asis", "AS-IS（現状）", !!drafts.asis?.dirty],
-    ["tobe", "TO-BE（改善後）", !!drafts.tobe?.dirty],
+    ["tobe", "TO-BE（改善後）", dirtyPlans.length > 0],
     ["compare", "比較", false],
   ];
 
   const renderFlowTab = (kind: FlowKind) => {
     const d = drafts[kind];
+    const isTobe = kind !== "asis";
     if (!d) {
       if (kind === "asis") {
         return (
@@ -328,20 +427,22 @@ export default function BusinessPage() {
       }
       return (
         <div className="empty-state">
-          <p>TO-BEはまだありません。</p>
+          <p>
+            TO-BE（{PLAN_LABEL[plan]}：{PLAN_DESC[plan]}）はまだありません。
+          </p>
           {aiEnabled && (
             <>
               <button className="btn primary" disabled={!drafts.asis?.doc || aiBusy} onClick={createTobeWithAi}>
-                {aiBusy ? "AIがTO-BEを作成しています…（1分ほどかかることがあります）" : "AIでTO-BEを作成"}
+                {aiBusy ? "AIが梅・竹・松の3案を作成しています…（1〜2分かかることがあります）" : "AIで梅・竹・松の3案を作成"}
               </button>
               <p className="muted small">
-                AS-ISの作業・時間・ボトルネックをもとに、AIが改善案を1つ作ります。できた図は、確認・手直ししてから保存できます。
+                AS-ISの作業・時間・ボトルネックをもとに、AIが改善案を3つ（梅・竹・松）まとめて作ります。できた図は、確認・手直ししてから保存できます。
               </p>
             </>
           )}
           <div className="row gap center">
             <button className={aiEnabled ? "btn ghost" : "btn primary"} disabled={!drafts.asis?.doc} onClick={() => startTobe(true)}>
-              {aiEnabled ? "AS-ISをコピーして作成" : "AS-ISをコピーして作成（おすすめ）"}
+              {aiEnabled ? `AS-ISをコピーして${PLAN_LABEL[plan]}を作成` : `AS-ISをコピーして${PLAN_LABEL[plan]}を作成（おすすめ）`}
             </button>
             <button className="btn ghost" onClick={() => startTobe(false)}>
               白紙から作成
@@ -369,9 +470,9 @@ export default function BusinessPage() {
             >
               ↶ 元に戻す
             </button>
-            {kind === "tobe" && aiEnabled && (
+            {isTobe && aiEnabled && (
               <button className="btn ghost" onClick={createTobeWithAi} disabled={aiBusy || !drafts.asis?.doc}>
-                {aiBusy ? "AIが作成しています…" : "AIで作り直す"}
+                {aiBusy ? "AIが3案を作成しています…" : "AIで3案を作り直す"}
               </button>
             )}
             <button className="btn ghost" onClick={() => exportPdf(kind)} disabled={d.data.steps.length === 0}>
@@ -389,21 +490,33 @@ export default function BusinessPage() {
               </button>
             )}
             <button className="btn primary" disabled={!d.dirty || busy} onClick={() => save(kind)}>
-              保存
+              {isTobe ? `${PLAN_LABEL[plan]}を保存` : "保存"}
             </button>
+            {isTobe && dirtyPlans.length > 1 && (
+              <button className="btn primary" disabled={busy} onClick={saveAllPlans}>
+                未保存の{dirtyPlans.length}案をすべて保存
+              </button>
+            )}
           </div>
         </div>
-        {kind === "tobe" && tobeAiNote && (
+        {isTobe && (
           <div className="ai-note">
             <div>
-              <strong>AIの改善案</strong>
-              <span>{tobeAiNote}</span>
+              <strong>
+                {PLAN_LABEL[plan]}の案{d.data.summary ? `：${d.data.summary}` : `（${PLAN_DESC[plan]}）`}
+              </strong>
+              {!!d.data.needs?.length && <span>導入・準備が必要なもの：{d.data.needs.join("、")}</span>}
               <span className="muted small">
-                内容を確認し、作業をクリックして手直ししてから「保存」してください。時間はAIの目安です。
+                作業をクリックすると手直しできます。時間はAIの目安なので、確認してから保存してください。費用は含みません。
               </span>
             </div>
-            <button className="btn ghost" onClick={() => setTobeAiNote(null)} aria-label="閉じる">
-              閉じる
+            <button
+              className={business.adopted_plan === plan ? "btn primary" : "btn ghost"}
+              disabled={!d.doc}
+              title={d.doc ? "業務一覧の削減時間に、この案を使います" : "保存すると採用できます"}
+              onClick={() => adopt(plan)}
+            >
+              {business.adopted_plan === plan ? "✓ 採用中（外す）" : "この案を採用"}
             </button>
           </div>
         )}
@@ -411,12 +524,12 @@ export default function BusinessPage() {
           ref={boardRef}
           flow={d.data}
           resources={resources}
-          kind={kind}
-          base={kind === "tobe" ? drafts.asis?.data : undefined}
+          kind={isTobe ? "tobe" : "asis"}
+          base={isTobe ? drafts.asis?.data : undefined}
           execView={business.exec_view}
           fieldView={business.field_view}
           exporting={exporting}
-          exportTitle={`${business.name}　${kind === "asis" ? "AS-IS（現状）" : "TO-BE（改善後）"}`}
+          exportTitle={`${business.name}　${isTobe ? `TO-BE（改善後・${PLAN_LABEL[plan]}）` : "AS-IS（現状）"}`}
           exportSub={`${company.name}　｜　${new Date().toLocaleDateString("ja-JP")} 出力`}
           editable
           onChange={(f, merge) => edit(kind, f, merge)}
@@ -454,7 +567,7 @@ export default function BusinessPage() {
                 <dd>
                   {fmtMin(perCase.asis)}
                   {perCase.tobe !== null && perCase.tobe !== perCase.asis && (
-                    <span className="biz-tobe" title="TO-BE（改善後）">
+                    <span className="biz-tobe" title={`TO-BE（改善後・${PLAN_LABEL[shownPlan]}）`}>
                       {" → "}
                       {fmtMin(perCase.tobe)}
                     </span>
@@ -567,23 +680,112 @@ export default function BusinessPage() {
             )}
           </div>
         )}
-        {tab === "tobe" && renderFlowTab("tobe")}
+        {tab === "tobe" && (
+          <div className="stack">
+            {planPicker}
+            {renderFlowTab(tobeKind)}
+          </div>
+        )}
         {tab === "compare" &&
-          (drafts.asis && drafts.tobe ? (
-            <ComparisonView
-              asis={drafts.asis.data}
-              tobe={drafts.tobe.data}
-              resources={resources}
-              frequency={business.frequency}
-              execView={business.exec_view}
-              fieldView={business.field_view}
-            />
+          (drafts.asis && PLANS.some((p) => drafts[planKind(p)]) ? (
+            <div className="stack">
+              <PlanSummary
+                asisMinutes={perCase.asis ?? 0}
+                plans={PLANS.map((p) => ({ plan: p, flow: drafts[planKind(p)]?.data ?? null, saved: !!drafts[planKind(p)]?.doc }))}
+                adopted={business.adopted_plan}
+                onAdopt={adopt}
+              />
+              {planPicker}
+              {drafts[tobeKind] ? (
+                <ComparisonView
+                  asis={drafts.asis.data}
+                  tobe={drafts[tobeKind].data}
+                  resources={resources}
+                  frequency={business.frequency}
+                  execView={business.exec_view}
+                  fieldView={business.field_view}
+                />
+              ) : (
+                <div className="empty-state">
+                  <p>{PLAN_LABEL[plan]}の案はまだありません。TO-BEタブで作成できます。</p>
+                </div>
+              )}
+            </div>
           ) : (
             <div className="empty-state">
-              <p>AS-ISとTO-BEの両方を作成すると、比較が表示されます。</p>
+              <p>AS-ISとTO-BE（梅・竹・松のどれか）を作成すると、比較が表示されます。</p>
             </div>
           ))}
       </section>
+    </div>
+  );
+}
+
+/** 梅・竹・松の3案を横に並べて見比べる表（比較タブの一番上） */
+function PlanSummary({
+  asisMinutes, plans, adopted, onAdopt,
+}: {
+  asisMinutes: number;
+  plans: { plan: Plan; flow: Flow | null; saved: boolean }[];
+  adopted: Plan | "";
+  onAdopt: (p: Plan) => void;
+}) {
+  return (
+    <div className="table-wrap">
+      <table className="plain plan-summary">
+        <thead>
+          <tr>
+            <th>案</th>
+            <th>内容</th>
+            <th>導入・準備が必要なもの</th>
+            <th className="num">1回あたりの時間</th>
+            <th className="num">削減時間（1回あたり）</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {plans.map(({ plan, flow, saved }) => {
+            const minutes = flow ? flow.steps.reduce((n, st) => n + (st.minutes || 0), 0) : null;
+            const cut = minutes === null ? null : asisMinutes - minutes;
+            return (
+              <tr key={plan} className={adopted === plan ? "adopted" : ""}>
+                <td>
+                  <strong className={`plan-badge ${plan}`}>{PLAN_LABEL[plan]}</strong>
+                </td>
+                <td>
+                  {flow ? flow.summary || PLAN_DESC[plan] : <span className="muted">未作成（{PLAN_DESC[plan]}）</span>}
+                </td>
+                <td className="small">{flow?.needs?.length ? flow.needs.join("、") : <span className="muted">—</span>}</td>
+                <td className="num">
+                  {minutes === null ? <span className="muted">—</span> : `${fmtMin(asisMinutes)} → ${fmtMin(minutes)}`}
+                </td>
+                <td className="num">
+                  {cut === null ? (
+                    <span className="muted">—</span>
+                  ) : (
+                    <span className={cut < 0 ? "saved minus" : "saved"}>
+                      {cut < 0 ? "−" : ""}
+                      {fmtMin(Math.abs(cut))}
+                    </span>
+                  )}
+                </td>
+                <td>
+                  {flow && (
+                    <button
+                      className={adopted === plan ? "btn primary" : "btn ghost"}
+                      disabled={!saved}
+                      title={saved ? "業務一覧の削減時間に、この案を使います" : "保存すると採用できます"}
+                      onClick={() => onAdopt(plan)}
+                    >
+                      {adopted === plan ? "✓ 採用中" : "採用"}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -2,7 +2,8 @@
 
 import { authHeaders } from "./auth";
 import type {
-  Business, Company, Comparison, Flow, FlowDoc, FlowKind, Me, Resource, ResourceKind, TobeSuggestion, UserRow,
+  Business, Company, Comparison, Flow, FlowDoc, FlowKind, Me, Plan, Resource, ResourceKind, TobeKind, TobeSuggestion,
+  UserRow,
 } from "./types";
 
 export class ApiError extends Error {
@@ -68,17 +69,26 @@ export const api = {
   /** ヒアリングボックスの記録を Azure OpenAI で決まった形式に整える（保存はしない） */
   formatHearing: (id: number, raw: string) =>
     call<{ text: string }>(`/api/businesses/${id}/hearing/format`, { body: { raw } }),
-  /** 保存済みのAS-ISから、Azure OpenAI で TO-BE の改善案を作る（保存はしない） */
+  /** 保存済みのAS-ISから、Azure OpenAI で TO-BE の改善案を梅・竹・松の3つ作る（保存はしない） */
   suggestTobe: (id: number) => call<TobeSuggestion>(`/api/businesses/${id}/tobe/suggest`, { body: {} }),
   deleteBusiness: (id: number) => call(`/api/businesses/${id}`, { method: "DELETE" }),
   setAssignees: (id: number, user_ids: number[]) =>
     call<Business>(`/api/businesses/${id}/assignees`, { method: "PUT", body: { user_ids } }),
 
   flows: (bid: number) =>
-    call<{ asis: FlowDoc | null; tobe: FlowDoc | null; comparison: Comparison | null }>(`/api/businesses/${bid}/flows`),
+    call<{
+      asis: FlowDoc | null;
+      /** 作成済みのTO-BEの案 */
+      plans: Partial<Record<Plan, FlowDoc>>;
+      comparisons: Partial<Record<Plan, Comparison>>;
+    }>(`/api/businesses/${bid}/flows`),
   saveFlow: (bid: number, kind: FlowKind, data: Flow, version: number) =>
     call<FlowDoc>(`/api/businesses/${bid}/flows/${kind}`, { method: "PUT", body: { data, version } }),
-  copyAsisToTobe: (bid: number) => call<FlowDoc>(`/api/businesses/${bid}/flows/tobe/copy-from-asis`, { body: {} }),
+  copyAsisToTobe: (bid: number, kind: TobeKind) =>
+    call<FlowDoc>(`/api/businesses/${bid}/flows/${kind}/copy-from-asis`, { body: {} }),
+  /** 採用する案を選ぶ（null で未選択に戻す） */
+  setAdopted: (bid: number, plan: Plan | null) =>
+    call<Business>(`/api/businesses/${bid}/adopted`, { method: "PUT", body: { plan } }),
   drawio: (bid: number, kind: FlowKind) => call<string>(`/api/businesses/${bid}/flows/${kind}/drawio`, { text: true }),
   renderDrawio: (flow: Flow, title: string) => call<string>("/api/render/drawio", { body: { flow, title }, text: true }),
 
