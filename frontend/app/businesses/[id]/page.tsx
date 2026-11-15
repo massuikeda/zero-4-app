@@ -9,6 +9,7 @@ import { FlowBoard } from "@/components/FlowBoard";
 import { ApiError, api } from "@/lib/api";
 import { normalize } from "@/lib/flow";
 import { parseHearing } from "@/lib/hearing";
+import { applyTobeChanges } from "@/lib/tobe";
 import { emptyFlow, type Business, type Company, type Flow, type FlowDoc, type FlowKind, type Resource } from "@/lib/types";
 
 type Tab = "notes" | "asis" | "tobe" | "compare";
@@ -48,6 +49,8 @@ export default function BusinessPage() {
   // Azure OpenAI（ヒアリングボックス → 決まった形式）
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
+  // AIが作ったTO-BEの要約（確認して保存するまで、TO-BEタブの上に出しておく）
+  const [tobeAiNote, setTobeAiNote] = useState<string | null>(null);
   // 元に戻す（Ctrl+Z）用の履歴。連続入力（文字の打鍵など）はまとめて1回分にする
   const history = useRef<Record<FlowKind, { stack: Flow[]; at: number; merge: boolean }>>({
     asis: { stack: [], at: 0, merge: false },
@@ -78,6 +81,7 @@ export default function BusinessPage() {
       // 前に開いていた別の業務のタブが残らないよう、どちらの場合も決める（保存後の読み直しでは変えない）
       if (openedBid.current !== bid) {
         openedBid.current = bid;
+        setTobeAiNote(null);
         setTab(f.asis ? "asis" : "notes");
       }
       api.config().then((x) => setAiEnabled(!!x.ai_enabled), () => setAiEnabled(false));
@@ -148,6 +152,7 @@ export default function BusinessPage() {
     try {
       const doc = await api.saveFlow(bid, kind, d.data, d.version);
       setDrafts((x) => ({ ...x, [kind]: fromDoc(doc) }));
+      if (kind === "tobe") setTobeAiNote(null);
       flash("ok", `${LABEL[kind]}を保存しました`);
     } catch (e) {
       flash("err", e instanceof ApiError && e.status === 409 ? `${e.message}（あなたの変更はまだ画面に残っています）` : String(e instanceof Error ? e.message : e));
@@ -199,6 +204,36 @@ export default function BusinessPage() {
         flash("ok", `AIでAS-ISを作り直しました（${counts}）。確認して「保存」すると確定します（「元に戻す」で前の状態に戻せます）`);
       }
       setTab("asis");
+    } catch (e) {
+      flash("err", e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  /**
+   * AIでTO-BEを作る：保存済みのAS-IS → Azure OpenAI が「どの作業をどう変えるか」を出す → 決まったルールでAS-ISに当てはめて図にする。
+   * できた図は保存前の下書き。確認・手直ししてから「保存」で確定する（すでにTO-BEがあれば「元に戻す」で戻せる）
+   */
+  const createTobeWithAi = async () => {
+    const asis = drafts.asis;
+    if (!asis?.doc) return flash("err", "先にAS-ISを作成して保存してください");
+    if (asis.dirty) return flash("err", "AS-ISに未保存の変更があります。先にAS-ISを保存してください");
+    if (drafts.tobe && !confirm("いまのTO-BEを、AIの改善案で作り直しますか？（保存するまでは「元に戻す」で戻せます）")) return;
+    setAiBusy(true);
+    setTobeAiNote(null);
+    try {
+      const s = await api.suggestTobe(bid);
+      const r = applyTobeChanges(asis.doc.data, s.changes, resources);
+      if (r.applied === 0) throw new Error("AIの改善案をAS-ISに当てはめられませんでした。もう一度お試しください");
+      if (drafts.tobe) {
+        edit("tobe", r.flow);
+      } else {
+        setDrafts((x) => ({ ...x, tobe: { data: r.flow, version: 0, dirty: true, doc: null } }));
+      }
+      const detail = Object.entries(r.counts).map(([k, n]) => `${k}${n}件`).join("・");
+      setTobeAiNote(`${s.summary ? `${s.summary}　` : ""}（${detail}）`);
+      setTab("tobe");
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
     } finally {
@@ -294,9 +329,19 @@ export default function BusinessPage() {
       return (
         <div className="empty-state">
           <p>TO-BEはまだありません。</p>
+          {aiEnabled && (
+            <>
+              <button className="btn primary" disabled={!drafts.asis?.doc || aiBusy} onClick={createTobeWithAi}>
+                {aiBusy ? "AIがTO-BEを作成しています…（1分ほどかかることがあります）" : "AIでTO-BEを作成"}
+              </button>
+              <p className="muted small">
+                AS-ISの作業・時間・ボトルネックをもとに、AIが改善案を1つ作ります。できた図は、確認・手直ししてから保存できます。
+              </p>
+            </>
+          )}
           <div className="row gap center">
-            <button className="btn primary" disabled={!drafts.asis?.doc} onClick={() => startTobe(true)}>
-              AS-ISをコピーして作成（おすすめ）
+            <button className={aiEnabled ? "btn ghost" : "btn primary"} disabled={!drafts.asis?.doc} onClick={() => startTobe(true)}>
+              {aiEnabled ? "AS-ISをコピーして作成" : "AS-ISをコピーして作成（おすすめ）"}
             </button>
             <button className="btn ghost" onClick={() => startTobe(false)}>
               白紙から作成
@@ -324,6 +369,11 @@ export default function BusinessPage() {
             >
               ↶ 元に戻す
             </button>
+            {kind === "tobe" && aiEnabled && (
+              <button className="btn ghost" onClick={createTobeWithAi} disabled={aiBusy || !drafts.asis?.doc}>
+                {aiBusy ? "AIが作成しています…" : "AIで作り直す"}
+              </button>
+            )}
             <button className="btn ghost" onClick={() => exportPdf(kind)} disabled={d.data.steps.length === 0}>
               PDFで保存
             </button>
@@ -343,6 +393,20 @@ export default function BusinessPage() {
             </button>
           </div>
         </div>
+        {kind === "tobe" && tobeAiNote && (
+          <div className="ai-note">
+            <div>
+              <strong>AIの改善案</strong>
+              <span>{tobeAiNote}</span>
+              <span className="muted small">
+                内容を確認し、作業をクリックして手直ししてから「保存」してください。時間はAIの目安です。
+              </span>
+            </div>
+            <button className="btn ghost" onClick={() => setTobeAiNote(null)} aria-label="閉じる">
+              閉じる
+            </button>
+          </div>
+        )}
         <FlowBoard
           ref={boardRef}
           flow={d.data}

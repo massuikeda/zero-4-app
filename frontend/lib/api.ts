@@ -2,7 +2,7 @@
 
 import { authHeaders } from "./auth";
 import type {
-  Business, Company, Comparison, Flow, FlowDoc, FlowKind, Me, Resource, ResourceKind, UserRow,
+  Business, Company, Comparison, Flow, FlowDoc, FlowKind, Me, Resource, ResourceKind, TobeSuggestion, UserRow,
 } from "./types";
 
 export class ApiError extends Error {
@@ -68,6 +68,8 @@ export const api = {
   /** ヒアリングボックスの記録を Azure OpenAI で決まった形式に整える（保存はしない） */
   formatHearing: (id: number, raw: string) =>
     call<{ text: string }>(`/api/businesses/${id}/hearing/format`, { body: { raw } }),
+  /** 保存済みのAS-ISから、Azure OpenAI で TO-BE の改善案を作る（保存はしない） */
+  suggestTobe: (id: number) => call<TobeSuggestion>(`/api/businesses/${id}/tobe/suggest`, { body: {} }),
   deleteBusiness: (id: number) => call(`/api/businesses/${id}`, { method: "DELETE" }),
   setAssignees: (id: number, user_ids: number[]) =>
     call<Business>(`/api/businesses/${id}/assignees`, { method: "PUT", body: { user_ids } }),

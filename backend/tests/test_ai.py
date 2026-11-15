@@ -78,3 +78,64 @@ def test_hearing_raw_is_saved():
         r = c.put(f"/api/businesses/{bid}/notes", json={"hearing_raw": "聞いたままのメモ"}, headers=TANAKA)
         assert r.status_code == 200 and r.json()["hearing_raw"] == "聞いたままのメモ"
         assert r.json()["hearing_notes"].startswith("取引先：")  # 送っていない項目はそのまま
+
+
+def _configure(monkeypatch, answer: str) -> FakeClient:
+    monkeypatch.setattr(settings, "azure_openai_endpoint", "https://example.openai.azure.com/")
+    monkeypatch.setattr(settings, "azure_openai_api_key", "test-key")
+    monkeypatch.setattr(settings, "azure_openai_deployment", "my-deploy")
+    fake = FakeClient(answer)
+    monkeypatch.setattr(ai, "_client", lambda: fake)
+    return fake
+
+
+def test_tobe_suggest(monkeypatch):
+    with TestClient(app) as c:
+        bid = _bid(c, "請求書発行業務")  # デモデータ：AS-ISのみ
+        asis = c.get(f"/api/businesses/{bid}/flows", headers=ADMIN).json()["asis"]["data"]
+        s0, s1 = asis["steps"][0], asis["steps"][1]
+        answer = """```json
+{"summary": "入力を自動化する", "changes": [
+  {"id": "%s", "action": "自動化", "name": "データを取り込む", "minutes": 99999, "tool": "会計システム", "media": "システム連携", "note": "手入力をやめる", "issue_resolved": true},
+  {"id": "%s", "action": "排除", "name": "無視される名前", "note": "不要になる"},
+  {"id": "S999", "action": "自動化", "note": "AS-ISにない作業"},
+  {"id": "%s", "action": "排除", "note": "同じ作業への2つ目の変更"},
+  {"id": "%s", "action": "魔法", "note": "決まっていない変更区分"}
+]}
+```""" % (s0["id"], s1["id"], s0["id"], asis["steps"][2]["id"])
+        fake = _configure(monkeypatch, answer)
+        r = c.post(f"/api/businesses/{bid}/tobe/suggest", headers=TANAKA)
+        assert r.status_code == 200, r.text
+        out = r.json()
+        assert out["summary"] == "入力を自動化する"
+        # AS-ISにない作業・同じ作業への2つ目・決まっていない変更区分は捨てる
+        assert [(x["id"], x["action"]) for x in out["changes"]] == [(s0["id"], "自動化"), (s1["id"], "排除")]
+        first = out["changes"][0]
+        assert first["tool"] == "会計システム" and first["media"] == "システム連携" and first["issue_resolved"] is True
+        assert first["minutes"] <= max(s0["minutes"], 0) or s0["minutes"] == 0  # 変更前より増やさない
+        assert out["changes"][1]["name"] is None  # 排除では作業名を使わない
+        # AIにはAS-ISの作業と、企業の道具の候補が渡る
+        last = fake.calls[0]["messages"][-1]["content"]
+        assert s0["id"] in last and s0["name"] in last and "道具の候補" in last and "<flow>" in last
+        # 保存はしない
+        assert c.get(f"/api/businesses/{bid}/flows", headers=ADMIN).json()["tobe"] is None
+        # 他社の業務は 404
+        other = c.get("/api/companies/2/businesses", headers=ADMIN).json()[0]["id"]
+        assert c.post(f"/api/businesses/{other}/tobe/suggest", headers=TANAKA).status_code == 404
+
+
+def test_tobe_suggest_errors(monkeypatch):
+    with TestClient(app) as c:
+        bid = _bid(c, "請求書発行業務")
+        # 設定がないとき
+        monkeypatch.setattr(settings, "azure_openai_endpoint", "")
+        assert c.post(f"/api/businesses/{bid}/tobe/suggest", headers=ADMIN).status_code == 503
+        # 読み取れない返事・使える変更が1つもない返事
+        _configure(monkeypatch, "改善案は次のとおりです。まず入力を減らします。")
+        assert c.post(f"/api/businesses/{bid}/tobe/suggest", headers=ADMIN).status_code == 502
+        _configure(monkeypatch, '{"summary": "x", "changes": [{"id": "S999", "action": "排除"}]}')
+        assert c.post(f"/api/businesses/{bid}/tobe/suggest", headers=ADMIN).status_code == 502
+        # AS-ISがまだない業務
+        new = c.post("/api/companies/1/businesses", headers=ADMIN, json={"name": "AS-ISなし"}).json()["id"]
+        assert c.post(f"/api/businesses/{new}/tobe/suggest", headers=ADMIN).status_code == 422
+        c.delete(f"/api/businesses/{new}", headers=ADMIN)

@@ -130,3 +130,20 @@ export interface Business {
 }
 
 export const emptyFlow = (): Flow => ({ lanes: [], steps: [] });
+
+/** AIによるTO-BEの改善案：AS-ISのどの作業を、どう変えるか */
+export interface TobeChange {
+  id: string;
+  action: Exclude<ChangeAction, "新規">;
+  name?: string | null;
+  minutes?: number | null;
+  tool?: string | null;
+  media?: string | null;
+  note: string;
+  issue_resolved?: boolean;
+}
+
+export interface TobeSuggestion {
+  summary: string;
+  changes: TobeChange[];
+}

@@ -551,3 +551,9 @@ tr.has-issue td:first-child { box-shadow: inset 3px 0 var(--danger); }
 table.plain th.num, table.plain td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 table.plain .saved { color: var(--good); font-weight: 700; }
 table.plain .saved.minus { color: var(--danger); }
+
+/* AIが作ったTO-BEの要約 */
+.ai-note { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  background: var(--accent-soft); border: 1px solid #c5dbf2; border-radius: 8px; padding: 10px 14px; }
+.ai-note > div { display: flex; flex-direction: column; gap: 2px; }
+.ai-note strong { color: var(--accent); }

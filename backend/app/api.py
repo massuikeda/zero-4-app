@@ -14,7 +14,8 @@ from .config import settings
 from .db import Business, Company, FlowDoc, Resource, SessionLocal, User, get_db, init_db, now
 from .schemas import (
     AssignIn, BusinessIn, BusinessNotesIn, BusinessOut, CompanyIn, CompanyOut, Flow, FlowDocOut, FlowKind,
-    FlowSaveIn, FlowsOut, HearingFormatIn, HearingFormatOut, Me, RenderIn, ResourceIn, ResourceOut, UserIn, UserOut,
+    FlowSaveIn, FlowsOut, HearingFormatIn, HearingFormatOut, Me, RenderIn, ResourceIn, ResourceOut, TobeSuggestOut,
+    UserIn, UserOut,
 )
 
 
@@ -239,6 +240,22 @@ def format_hearing(bid: int, body: HearingFormatIn, user: User = Depends(current
     except ai.AIError as e:
         raise HTTPException(e.status, str(e)) from e
     return HearingFormatOut(text=text)
+
+
+@app.post("/api/businesses/{bid}/tobe/suggest", response_model=TobeSuggestOut)
+def suggest_tobe(bid: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """保存済みのAS-ISから、Azure OpenAI で TO-BE の改善案（どの作業をどう変えるか）を作る。
+    保存はしない。画面がAS-ISに当てはめて図にし、利用者が確認してから保存する"""
+    b = get_business_or_404(db, user, bid)
+    asis = {f.kind: f for f in b.flows}.get("asis")
+    if not asis:
+        raise HTTPException(422, "先にAS-ISを作成して保存してください")
+    rs = db.scalars(select(Resource).where(Resource.company_id == b.company_id).order_by(Resource.sort, Resource.id)).all()
+    tools = [r.name for r in rs if r.kind in ("システム", "帳票")]
+    try:
+        return ai.suggest_tobe(Flow.model_validate(asis.data), b.name, b.frequency, tools)
+    except ai.AIError as e:
+        raise HTTPException(e.status, str(e)) from e
 
 
 @app.delete("/api/businesses/{bid}")

@@ -185,6 +185,27 @@ class HearingFormatOut(BaseModel):
     text: str
 
 
+# ---------- AIによるTO-BEの改善案 ----------
+# AIが出すのは「AS-ISのどの作業を、どう変えるか」の一覧だけ。TO-BEの図は、これをAS-ISに当てはめて画面側で作る
+TobeAction = Literal["排除", "統合", "入替", "簡素化", "自動化"]
+
+
+class TobeChange(BaseModel):
+    id: str                       # 変える作業（AS-ISの作業ID）
+    action: TobeAction            # 変更区分
+    name: Optional[str] = Field(None, max_length=60)   # 変更後の作業名（排除では使わない）
+    minutes: Optional[int] = Field(None, ge=0, le=100000)  # 変更後の所要時間（分）
+    tool: Optional[str] = Field(None, max_length=60)   # 変更後の道具
+    media: Optional[str] = Field(None, max_length=20)  # 変更後の、次の作業への渡し方
+    note: str = Field("", max_length=200)              # 何をどう変えるか・なぜか
+    issue_resolved: bool = False  # この変更で、その作業のボトルネックが解消するか
+
+
+class TobeSuggestOut(BaseModel):
+    summary: str = ""             # 改善案の要約
+    changes: list[TobeChange]
+
+
 class AssignIn(BaseModel):
     user_ids: list[int]
 
