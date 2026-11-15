@@ -139,3 +139,15 @@ def test_bank_registers_company_user():
         assert c.post("/api/users", headers=ADMIN,
                       json={"email": "New@yamada-ss.example", "name": "重複", "role": "member", "company_id": 2}).status_code == 409
         assert c.delete(f"/api/users/{r.json()['id']}", headers=ADMIN).status_code == 200
+
+
+def test_saved_minutes_in_business_list():
+    with TestClient(app) as c:
+        bs = {b["name"]: b for b in c.get("/api/companies/1/businesses", headers=ADMIN).json()}
+        b = bs["受注〜出荷業務"]  # デモデータでTO-BEまで作成済み
+        cmp = c.get(f"/api/businesses/{b['id']}/flows", headers=ADMIN).json()["comparison"]
+        # 一覧の削減時間は、比較タブと同じ値
+        assert b["saved_minutes"] == cmp["asis_minutes"] - cmp["tobe_minutes"] > 0
+        # TO-BEがまだない業務は空
+        no_tobe = [x for x in c.get("/api/companies/1/businesses", headers=ADMIN).json() if x["status"] != "TO-BE作成済"]
+        assert no_tobe and all(x["saved_minutes"] is None for x in no_tobe)

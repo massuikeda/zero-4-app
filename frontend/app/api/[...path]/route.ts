@@ -22,7 +22,10 @@ function explain(e: unknown): { status: number; detail: string } {
   const err = e instanceof Error ? e : new Error(String(e));
   const cause = (err.cause ?? {}) as { code?: string; message?: string };
   const code = cause.code ?? (err as { code?: string }).code ?? err.name;
-  const set = process.env.BACKEND_URL ? "" : "（BACKEND_URL が設定されていません）";
+  // 未設定のときは http://localhost:8000 へつなぐ（ローカルの開発用）
+  const set = process.env.BACKEND_URL
+    ? ""
+    : "（ローカルではバックエンドを起動してください。Azure ではアプリ設定 BACKEND_URL を入れてください）";
   if (err.name === "TimeoutError") {
     return { status: 504, detail: "サーバーの応答が時間内にありませんでした。もう一度お試しください" };
   }

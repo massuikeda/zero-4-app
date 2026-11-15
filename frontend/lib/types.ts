@@ -124,6 +124,8 @@ export interface Business {
   field_view: string;
   updated_at: string;
   status: "未着手" | "AS-IS作成済" | "TO-BE作成済";
+  /** 削減時間（1回あたり・分）。TO-BEがまだなければ null */
+  saved_minutes: number | null;
   assignee_ids: number[];
 }
 

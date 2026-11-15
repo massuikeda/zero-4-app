@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useMe } from "@/components/AppShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { formatEmployees } from "@/lib/company";
+import { formatMinutes } from "@/lib/flow";
 import { api } from "@/lib/api";
 import { RESOURCE_KINDS, type Business, type Company, type Resource, type ResourceKind, type UserRow } from "@/lib/types";
 
@@ -133,6 +134,7 @@ function BusinessList({
               <th>部署</th>
               <th>頻度</th>
               <th>状況</th>
+              <th className="num">削減時間（1回あたり）</th>
               <th>更新日</th>
               {isAdmin && <th />}
             </tr>
@@ -149,6 +151,16 @@ function BusinessList({
                 <td>{b.frequency}</td>
                 <td>
                   <span className={`status s${["未着手", "AS-IS作成済", "TO-BE作成済"].indexOf(b.status)}`}>{b.status}</span>
+                </td>
+                <td className="num">
+                  {b.saved_minutes == null ? (
+                    <span className="muted">—</span>
+                  ) : (
+                    <span className={b.saved_minutes < 0 ? "saved minus" : "saved"}>
+                      {b.saved_minutes < 0 ? "−" : ""}
+                      {formatMinutes(Math.abs(b.saved_minutes))}
+                    </span>
+                  )}
                 </td>
                 <td className="small muted">{new Date(b.updated_at).toLocaleDateString("ja-JP")}</td>
                 {isAdmin && (
@@ -169,7 +181,7 @@ function BusinessList({
             ))}
             {shown.length === 0 && (
               <tr>
-                <td colSpan={6} className="muted center">
+                <td colSpan={7} className="muted center">
                   {isAdmin ? "業務がまだありません" : "業務はまだ登録されていません。銀行の担当者にお問い合わせください"}
                 </td>
               </tr>

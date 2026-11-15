@@ -546,3 +546,8 @@ tr.has-issue td:first-child { box-shadow: inset 3px 0 var(--danger); }
 .login-other { text-align: center; border-top: 1px solid var(--line); padding-top: 14px; }
 .login-other a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .login-other a:hover { text-decoration: underline; }
+
+/* 業務一覧の削減時間 */
+table.plain th.num, table.plain td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+table.plain .saved { color: var(--good); font-weight: 700; }
+table.plain .saved.minus { color: var(--danger); }

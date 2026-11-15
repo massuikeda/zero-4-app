@@ -115,6 +115,8 @@ class BusinessOut(_Out):
     field_view: str
     updated_at: datetime
     status: str = "未着手"
+    # 削減時間（1回あたり・分）＝ AS-ISの合計時間 − TO-BEの合計時間。TO-BEがまだなければ None
+    saved_minutes: Optional[int] = None
     assignee_ids: list[int] = []
 
 

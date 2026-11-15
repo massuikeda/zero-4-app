@@ -39,9 +39,22 @@ def _status(b: Business) -> str:
     return "TO-BE作成済" if "tobe" in kinds else "AS-IS作成済" if "asis" in kinds else "未着手"
 
 
+def _saved_minutes(b: Business) -> int | None:
+    """削減時間（1回あたり・分）。比較タブの「削減時間」と同じ計算（作業時間の合計の差）"""
+    flows = {f.kind: f for f in b.flows}
+    if "asis" not in flows or "tobe" not in flows:
+        return None
+
+    def total(f: FlowDoc) -> int:
+        return sum(int(s.get("minutes") or 0) for s in (f.data or {}).get("steps", []))
+
+    return total(flows["asis"]) - total(flows["tobe"])
+
+
 def _business_out(b: Business, user: User) -> BusinessOut:
     out = BusinessOut.model_validate(b)
     out.status = _status(b)
+    out.saved_minutes = _saved_minutes(b)
     out.assignee_ids = [u.id for u in b.assignees] if user.role == "admin" else []
     return out
 
