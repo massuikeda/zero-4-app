@@ -62,6 +62,10 @@ jobs:
           cp -r .next/static .next/standalone/.next/static
           cp -r public .next/standalone/public
           cd .next/standalone
+          # 起動のときに、前のデプロイが残したページの控えを消す（scripts/azure-server.js を参照）。
+          # App Service のスタートアップ コマンドは「node server.js」のままでよい
+          mv server.js next-server.js
+          cp ../../scripts/azure-server.js server.js
           zip -qr "$GITHUB_WORKSPACE/frontend.zip" .
 
       - name: App Service にデプロイ
