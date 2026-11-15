@@ -78,6 +78,7 @@ erDiagram
 - `flows.version` は保存のたびに1増え、古い画面からの上書きを防ぎます
 - TO-BE は松竹梅の3案です（`kind` が `tobe_ume`＝梅：やり方の見直しだけ／`tobe_take`＝竹：手ごろなツールの導入／`tobe_matsu`＝松：RPA・システム連携で自動化）。1案だけだったころの `kind = tobe` の行は使いません（残っていても画面には出ません）
 - `businesses.adopted_plan` は「採用する案」です。業務一覧の削減時間に使います（未選択なら竹）
+- `businesses.exec_view`（経営者の認識）と `field_view`（現場の実態）は、画面から入力欄と表示を外したので、今は使っていません（列とデータは残してあります）
 - 削減時間は保存していません。AS-IS と TO-BE の作業時間の合計の差を、表示のたびに計算します
 
 ## flows.data の中身（JSON）

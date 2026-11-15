@@ -83,11 +83,14 @@ export default function BusinessPage() {
       setCompany(c);
       setResources(r);
       setNotes({ hearing_raw: b.hearing_raw, hearing_notes: b.hearing_notes, exec_view: b.exec_view, field_view: b.field_view, dirty: false });
+      // デプロイの途中など、バックエンドがまだ古い（3案に対応する前の）ときは plans が返ってこない。
+      // その間も画面が止まらないよう、案は「まだない」ものとして扱う
+      const plans = f.plans ?? {};
       setDrafts({
         asis: fromDoc(f.asis),
-        tobe_ume: fromDoc(f.plans.ume ?? null),
-        tobe_take: fromDoc(f.plans.take ?? null),
-        tobe_matsu: fromDoc(f.plans.matsu ?? null),
+        tobe_ume: fromDoc(plans.ume ?? null),
+        tobe_take: fromDoc(plans.take ?? null),
+        tobe_matsu: fromDoc(plans.matsu ?? null),
       });
       // 開いたときのタブ：AS-ISがまだなければヒアリング、あればAS-IS。
       // 前に開いていた別の業務のタブが残らないよう、どちらの場合も決める（保存後の読み直しでは変えない）
@@ -95,8 +98,8 @@ export default function BusinessPage() {
         openedBid.current = bid;
         setTab(f.asis ? "asis" : "notes");
         // 最初に見せる案：採用する案 → 作成済みの案（竹を優先）→ 竹
-        const made = (["take", "ume", "matsu"] as const).filter((p) => f.plans[p]);
-        setPlan(b.adopted_plan && f.plans[b.adopted_plan] ? b.adopted_plan : made[0] ?? "take");
+        const made = (["take", "ume", "matsu"] as const).filter((p) => plans[p]);
+        setPlan(b.adopted_plan && plans[b.adopted_plan] ? b.adopted_plan : made[0] ?? "take");
       }
       api.config().then((x) => setAiEnabled(!!x.ai_enabled), () => setAiEnabled(false));
     } catch (e) {
@@ -174,7 +177,7 @@ export default function BusinessPage() {
     }
   };
 
-  /** ヒアリングボックス・経営者の認識・現場の実態を保存する */
+  /** ヒアリングボックスを保存する */
   const saveNotes = async () => {
     setBusy(true);
     try {
@@ -526,8 +529,6 @@ export default function BusinessPage() {
           resources={resources}
           kind={isTobe ? "tobe" : "asis"}
           base={isTobe ? drafts.asis?.data : undefined}
-          execView={business.exec_view}
-          fieldView={business.field_view}
           exporting={exporting}
           exportTitle={`${business.name}　${isTobe ? `TO-BE（改善後・${PLAN_LABEL[plan]}）` : "AS-IS（現状）"}`}
           exportSub={`${company.name}　｜　${new Date().toLocaleDateString("ja-JP")} 出力`}
@@ -616,27 +617,6 @@ export default function BusinessPage() {
                 }}
               />
             </div>
-            <p className="muted small">AS-ISの図の右下に表示されます。</p>
-            <div className="views-grid">
-              <label className="exec">
-                経営者の認識
-                <textarea
-                  rows={3}
-                  value={notes.exec_view}
-                  placeholder="例：受注から出荷まで、問題なく回っている"
-                  onChange={(e) => setNotes({ ...notes, exec_view: e.target.value, dirty: true })}
-                />
-              </label>
-              <label className="field">
-                現場の実態
-                <textarea
-                  rows={3}
-                  value={notes.field_view}
-                  placeholder="例：同じ注文を3回入力し、毎日残業で埋めている"
-                  onChange={(e) => setNotes({ ...notes, field_view: e.target.value, dirty: true })}
-                />
-              </label>
-            </div>
             {regenOffer && (
               <div className="regen">
                 <span>AS-ISはすでにあります。ヒアリングボックスの内容で、AIでAS-ISを作り直しますか？（保存するまでは「元に戻す」で戻せます）</span>
@@ -702,8 +682,6 @@ export default function BusinessPage() {
                   tobe={drafts[tobeKind].data}
                   resources={resources}
                   frequency={business.frequency}
-                  execView={business.exec_view}
-                  fieldView={business.field_view}
                 />
               ) : (
                 <div className="empty-state">

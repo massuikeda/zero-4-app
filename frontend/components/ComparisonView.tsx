@@ -9,11 +9,9 @@ interface Props {
   tobe: Flow;
   resources: Resource[];
   frequency: string;
-  execView?: string;
-  fieldView?: string;
 }
 
-export function ComparisonView({ asis, tobe, resources, frequency, execView, fieldView }: Props) {
+export function ComparisonView({ asis, tobe, resources, frequency }: Props) {
   const c = compare(asis, tobe, resources);
   const changed = tobe.steps.filter((s) => s.change);
   const tobeIds = new Set(tobe.steps.map((s) => s.id));
@@ -114,7 +112,7 @@ export function ComparisonView({ asis, tobe, resources, frequency, execView, fie
       </section>
 
       <h3 className="bar asis">AS-IS（現状）</h3>
-      <FlowBoard flow={asis} resources={resources} kind="asis" execView={execView} fieldView={fieldView} />
+      <FlowBoard flow={asis} resources={resources} kind="asis" />
       <h3 className="bar tobe">TO-BE（改善後）</h3>
       <FlowBoard flow={tobe} resources={resources} kind="tobe" base={asis} />
     </div>

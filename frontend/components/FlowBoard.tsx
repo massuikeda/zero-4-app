@@ -6,7 +6,7 @@
  *  - 人のアイコン＋作業名、画面アイコン（PC作業）、色付きの札（使っている道具）
  *  - 矢印のラベル = 受け渡し手段（FAX・メール・配達…）
  *  - 作業名が赤 = ボトルネック、¥ = お金の流れ
- *  - 右側 = ボトルネック一覧（TO-BEは改善ポイント）、3つの集計、経営者の認識／現場の実態
+ *  - 右側 = ボトルネック一覧（TO-BEは改善ポイント）、3つの集計
  */
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -34,8 +34,6 @@ interface Props {
   kind: "asis" | "tobe";
   /** TO-BEで集計を「AS-IS → TO-BE」と並べて見せるときのAS-IS */
   base?: Flow;
-  execView?: string;
-  fieldView?: string;
   exporting?: boolean;
   /** 画像・PDFに出力するときだけ上に出す見出し */
   exportTitle?: string;
@@ -243,7 +241,7 @@ const HELP: [string, string][] = [
 // ---------------- 本体 ----------------
 
 export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
-  { flow, resources, kind, base, execView, fieldView, exporting, exportTitle, exportSub, editable: editableProp, onChange },
+  { flow, resources, kind, base, exporting, exportTitle, exportSub, editable: editableProp, onChange },
   ref,
 ) {
   const editable = !!editableProp && !!onChange && !exporting;
@@ -849,8 +847,6 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
           base={base}
           resources={resources}
           nums={nums}
-          execView={execView}
-          fieldView={fieldView}
         />
       )}
     </div>
@@ -899,10 +895,9 @@ function AddLaneForm({
 }
 
 function SidePanel({
-  flow, kind, base, resources, nums, execView, fieldView,
+  flow, kind, base, resources, nums,
 }: {
   flow: Flow; kind: "asis" | "tobe"; base?: Flow; resources: Resource[]; nums: Map<string, number>;
-  execView?: string; fieldView?: string;
 }) {
   const c = counters(flow, resources);
   const b = base ? counters(base, resources) : null;
@@ -962,23 +957,6 @@ function SidePanel({
         <CounterBox v={c.mail} b={b?.mail} unit="回" label="メール連絡" tobe={kind === "tobe"} />
         <CounterBox v={c.paper} b={b?.paper} unit="か所" label="紙" tobe={kind === "tobe"} />
       </div>
-
-      {kind === "asis" && (execView || fieldView) && (
-        <div className="fb-views">
-          {execView && (
-            <>
-              <div className="fb-view-label exec">経営者の認識</div>
-              <p>「{execView}」</p>
-            </>
-          )}
-          {fieldView && (
-            <>
-              <div className="fb-view-label field">現場の実態</div>
-              <p>「{fieldView}」</p>
-            </>
-          )}
-        </div>
-      )}
     </aside>
   );
 }

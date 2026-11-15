@@ -87,7 +87,7 @@ function Shell({ children }: { children: React.ReactNode }) {
                 {me.name}
                 <em>{ROLE_LABEL[me.role] ?? me.role}</em>
               </span>
-              <button className="btn ghost light" onClick={() => logout()}>
+              <button className="btn ghost" onClick={() => logout()}>
                 ログアウト
               </button>
             </>
