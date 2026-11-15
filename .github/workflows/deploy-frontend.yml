@@ -52,10 +52,8 @@ jobs:
       - name: パッケージのインストール
         run: npm ci
 
-      - name: 型チェック
-        run: npx tsc --noEmit
-
-      - name: ビルド
+      # 型チェックはビルドの中で行われる（型に誤りがあるとビルドが失敗し、デプロイされない）
+      - name: ビルド（型チェックを含む）
         run: npm run build
 
       - name: デプロイ用にまとめる
