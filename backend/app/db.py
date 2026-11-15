@@ -71,6 +71,10 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(200))
     role: Mapped[str] = mapped_column(String(20), default="member")
     company_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=True)
+    # パスワードでのログイン（AUTH_MODE=password）。パスワードそのものは持たず、元に戻せない形（scrypt）だけを持つ
+    password_hash: Mapped[str] = mapped_column(String(255), default="")
+    failed_logins: Mapped[int] = mapped_column(default=0)  # 続けて間違えた回数
+    locked_until: Mapped[datetime | None] = mapped_column(nullable=True)  # この時刻（UTC）までログインできない
 
     company: Mapped[Company | None] = relationship(back_populates="users")
     businesses: Mapped[list["Business"]] = relationship(secondary=assignments, back_populates="assignees")
@@ -191,6 +195,9 @@ _ADDED_COLUMNS = [
     ("businesses", "adopted_plan", "VARCHAR(10) NOT NULL DEFAULT ''"),
     ("companies", "hourly_wage", "INTEGER"),
     ("businesses", "monthly_count", "INTEGER"),
+    ("users", "password_hash", "VARCHAR(255) NOT NULL DEFAULT ''"),
+    ("users", "failed_logins", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "locked_until", "DATETIME NULL"),
 ]
 
 

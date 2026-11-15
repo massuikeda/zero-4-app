@@ -75,6 +75,7 @@ input[readonly], select:disabled { background: #f8f9fb; }
 .title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 
 .alert { background: #fdecea; color: var(--danger); padding: 10px 14px; border-radius: 8px; }
+.notice { background: #e8f5e9; color: #1b5e20; padding: 10px 14px; border-radius: 8px; }
 .toast { background: #e8f5e9; color: var(--good); padding: 10px 14px; border-radius: 8px; }
 .error { color: var(--danger); white-space: pre-wrap; font-size: 12px; }
 
@@ -537,7 +538,7 @@ tr.has-issue td:first-child { box-shadow: inset 3px 0 var(--danger); }
 .login-kind.bank { background: #1f3a5f; color: #fff; }
 .login-kind.company { background: var(--accent-soft); color: var(--accent); }
 .login-field { display: flex; flex-direction: column; gap: 6px; }
-.login-field select { padding: 9px 10px; font-size: 14px; }
+.login-field select, .login-field input { padding: 9px 10px; font-size: 14px; }
 .login-btn { padding: 11px 14px; font-size: 15px; }
 .login-other { text-align: center; border-top: 1px solid var(--line); padding-top: 14px; }
 .login-other a { color: var(--accent); text-decoration: none; font-weight: 600; }

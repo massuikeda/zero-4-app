@@ -4,8 +4,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Suspense, createContext, useContext, useEffect, useState } from "react";
 import { Logo } from "@/components/Logo";
-import { api } from "@/lib/api";
-import { AUTH_MODE, LOGIN_PATH, REDIRECT_PATH, getPortal, initAuth, isPublicPath, logout } from "@/lib/auth";
+import { ApiError, api } from "@/lib/api";
+import {
+  type AuthMode, LOGIN_PATH, REDIRECT_PATH, clearLogin, getAuthMode, getPortal, initAuth, isPublicPath, logout,
+} from "@/lib/auth";
 import type { Me } from "@/lib/types";
 
 const MeContext = createContext<Me | null>(null);
@@ -42,6 +44,11 @@ function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const isPublic = isPublicPath(pathname);
   const [state, setState] = useState<State>({ kind: "loading" });
+  const [mode, setMode] = useState<AuthMode | null>(null);
+
+  useEffect(() => {
+    getAuthMode().then(setMode, () => undefined);
+  }, []);
 
   useEffect(() => {
     if (isPublic) return;
@@ -56,6 +63,13 @@ function Shell({ children }: { children: React.ReactNode }) {
         const me = await api.me();
         if (!cancelled) setState({ kind: "ready", me });
       } catch (e) {
+        // パスワードのログインが切れている（期限切れ・別の端末でパスワード変更）ときは、ログイン画面へ
+        if (e instanceof ApiError && e.status === 401 && (await getAuthMode()) === "password") {
+          const portal = getPortal() ?? "company";
+          clearLogin();
+          router.replace(LOGIN_PATH[portal]);
+          return;
+        }
         if (!cancelled) setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
       }
     })();
@@ -76,8 +90,8 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Logo />
         </Link>
         <div className="topbar-right">
-          {AUTH_MODE === "dev" && (
-            <span className="dev-badge" title="仮のログインです（ユーザーを選ぶだけで、パスワードはありません）。あとで Entra ID のログインに置き換えます">
+          {mode === "dev" && (
+            <span className="dev-badge" title="仮のログインです（ユーザーを選ぶだけで、パスワードはありません）。本番ではアプリ設定 AUTH_MODE=password にします">
               仮ログイン
             </span>
           )}
@@ -92,6 +106,11 @@ function Shell({ children }: { children: React.ReactNode }) {
                 {me.name}
                 <em>{ROLE_LABEL[me.role] ?? me.role}</em>
               </span>
+              {mode === "password" && (
+                <Link href="/account/password" className="top-link">
+                  パスワード変更
+                </Link>
+              )}
               <button className="btn ghost" onClick={() => logout()}>
                 ログアウト
               </button>

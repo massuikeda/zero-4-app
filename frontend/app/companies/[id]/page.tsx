@@ -8,6 +8,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { formatEmployees } from "@/lib/company";
 import { formatMinutes } from "@/lib/flow";
 import { api } from "@/lib/api";
+import { type AuthMode, PASSWORD_MIN, getAuthMode } from "@/lib/auth";
 import { PLAN_LABEL, type Business, type Company, type Resource, type UserRow } from "@/lib/types";
 
 type Tab = "businesses" | "users";
@@ -268,13 +269,33 @@ function BusinessList({
 function CompanyUserManager({
   cid, users, onChange, guard,
 }: { cid: number; users: UserRow[]; onChange: () => void; guard: Guard }) {
-  const [form, setForm] = useState({ name: "", email: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [mode, setMode] = useState<AuthMode | null>(null);
+  /** パスワードを決め直している人と、入力中のパスワード */
+  const [reset, setReset] = useState<{ id: number; password: string } | null>(null);
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
+  const usePassword = mode === "password";
+  const pwOk = !usePassword || form.password.length >= PASSWORD_MIN;
+
+  useEffect(() => {
+    getAuthMode().then(setMode, () => undefined);
+  }, []);
 
   const add = () =>
     guard(async () => {
-      await api.createUser({ name: form.name.trim(), email: form.email.trim(), role: "member", company_id: cid });
-      setForm({ name: "", email: "" });
+      await api.createUser({
+        name: form.name.trim(), email: form.email.trim(), role: "member", company_id: cid,
+        ...(usePassword ? { password: form.password } : {}),
+      });
+      setForm({ name: "", email: "", password: "" });
+      onChange();
+    });
+
+  const saveReset = () =>
+    reset &&
+    guard(async () => {
+      await api.resetUserPassword(reset.id, reset.password);
+      setReset(null);
       onChange();
     });
 
@@ -282,7 +303,8 @@ function CompanyUserManager({
     <div className="stack">
       <p className="muted small">
         ここに登録した人は「企業の方のログイン」からログインし、この企業の業務だけを見られます（ヒアリング・AS-IS・TO-BE の閲覧と編集）。
-        本番では、同じメールアドレスの Microsoft アカウントでログインします（Entra ID にゲストとして招待してください）。
+        {usePassword &&
+          ` 初期パスワード（${PASSWORD_MIN}文字以上）はここで決めて、本人に伝えてください。本人はログイン後に「パスワード変更」から変えられます。`}
       </p>
       <div className="table-wrap">
         <table className="plain">
@@ -290,6 +312,7 @@ function CompanyUserManager({
             <tr>
               <th>名前</th>
               <th>メールアドレス</th>
+              {usePassword && <th>パスワード</th>}
               <th />
             </tr>
           </thead>
@@ -298,6 +321,51 @@ function CompanyUserManager({
               <tr key={u.id}>
                 <td>{u.name}</td>
                 <td className="mono">{u.email}</td>
+                {usePassword && (
+                  <td>
+                    {reset?.id === u.id ? (
+                      <form
+                        className="row gap"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          if (reset.password.length >= PASSWORD_MIN) saveReset();
+                        }}
+                      >
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          placeholder={`新しいパスワード（${PASSWORD_MIN}文字以上）`}
+                          value={reset.password}
+                          onChange={(e) => setReset({ id: u.id, password: e.target.value })}
+                          autoFocus
+                        />
+                        <button type="submit" className="btn primary" disabled={reset.password.length < PASSWORD_MIN}>
+                          保存
+                        </button>
+                        <button type="button" className="btn ghost" onClick={() => setReset(null)}>
+                          やめる
+                        </button>
+                      </form>
+                    ) : (
+                      <span className="row gap">
+                        {u.locked ? (
+                          <span className="small" style={{ color: "var(--danger)" }}>ロック中</span>
+                        ) : u.has_password ? (
+                          <span className="small muted">設定済み</span>
+                        ) : (
+                          <span className="small" style={{ color: "var(--danger)" }}>未設定（ログインできません）</span>
+                        )}
+                        <button
+                          className="btn ghost"
+                          title="忘れたとき・ロックされたときに、パスワードを決め直します（ロックも解けます）"
+                          onClick={() => setReset({ id: u.id, password: "" })}
+                        >
+                          再設定
+                        </button>
+                      </span>
+                    )}
+                  </td>
+                )}
                 <td>
                   <button
                     className="btn-delete"
@@ -314,7 +382,7 @@ function CompanyUserManager({
             ))}
             {users.length === 0 && (
               <tr>
-                <td colSpan={3} className="muted center">
+                <td colSpan={usePassword ? 4 : 3} className="muted center">
                   まだ登録されていません
                 </td>
               </tr>
@@ -326,7 +394,7 @@ function CompanyUserManager({
         className="card dashed row gap wrap"
         onSubmit={(e) => {
           e.preventDefault();
-          if (form.name.trim() && emailOk) add();
+          if (form.name.trim() && emailOk && pwOk) add();
         }}
       >
         <strong>企業ユーザーを追加</strong>
@@ -334,10 +402,20 @@ function CompanyUserManager({
         <input
           type="email"
           placeholder="メールアドレス"
+          autoComplete="off"
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
         />
-        <button type="submit" className="btn primary" disabled={!form.name.trim() || !emailOk}>
+        {usePassword && (
+          <input
+            type="password"
+            autoComplete="new-password"
+            placeholder={`初期パスワード（${PASSWORD_MIN}文字以上）`}
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+          />
+        )}
+        <button type="submit" className="btn primary" disabled={!form.name.trim() || !emailOk || !pwOk}>
           追加
         </button>
       </form>

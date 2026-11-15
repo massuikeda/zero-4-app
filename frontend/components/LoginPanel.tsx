@@ -3,8 +3,11 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ROLE_LABEL } from "@/components/AppShell";
-import { api } from "@/lib/api";
-import { AUTH_MODE, LOGIN_PATH, type Portal, devLogin, entraLogin, getPortal, initAuth, logout } from "@/lib/auth";
+import { ApiError, api } from "@/lib/api";
+import {
+  type AuthMode, LOGIN_PATH, type Portal, clearLogin, devLogin, entraLogin, getAuthMode, getPortal, initAuth, logout,
+  passwordLogin,
+} from "@/lib/auth";
 import type { UserRow } from "@/lib/types";
 
 const TEXT: Record<Portal, { title: string; lead: string; other: Portal; otherLabel: string }> = {
@@ -29,8 +32,10 @@ function goHome() {
 
 export function LoginPanel({ portal }: { portal: Portal }) {
   const t = TEXT[portal];
+  const [mode, setMode] = useState<AuthMode | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -38,13 +43,22 @@ export function LoginPanel({ portal }: { portal: Portal }) {
     let cancelled = false;
     (async () => {
       try {
+        const m = await getAuthMode();
+        if (cancelled) return;
+        setMode(m);
         // Entra ID から戻ってきたとき（またはログイン済みで開いたとき）は、確認してトップへ
         if (getPortal() === portal && (await initAuth())) {
-          await api.me();
-          goHome();
-          return;
+          try {
+            await api.me();
+            goHome();
+            return;
+          } catch (e) {
+            // ログインの期限切れなど。ログイン画面のまま入力してもらう
+            if (!(m === "password" && e instanceof ApiError && e.status === 401)) throw e;
+            clearLogin();
+          }
         }
-        if (AUTH_MODE === "dev") {
+        if (m === "dev") {
           const list = await api.devUsers(portal === "bank" ? "admin" : "member");
           if (cancelled) return;
           setUsers(list);
@@ -63,8 +77,13 @@ export function LoginPanel({ portal }: { portal: Portal }) {
     setBusy(true);
     setError(null);
     try {
-      if (AUTH_MODE === "entra") {
+      if (mode === "entra") {
         await entraLogin(portal); // Microsoft のログイン画面へ移動する
+        return;
+      }
+      if (mode === "password") {
+        await passwordLogin(portal, email, password); // 入口と役割の確認もここでされる
+        goHome();
         return;
       }
       devLogin(portal, email);
@@ -86,7 +105,7 @@ export function LoginPanel({ portal }: { portal: Portal }) {
         {error && (
           <div className="alert">
             {error}
-            {getPortal() && AUTH_MODE === "entra" && (
+            {getPortal() && mode === "entra" && (
               <div>
                 <button className="btn ghost" onClick={() => logout()}>
                   別のアカウントでログインし直す
@@ -96,7 +115,44 @@ export function LoginPanel({ portal }: { portal: Portal }) {
           </div>
         )}
 
-        {AUTH_MODE === "entra" ? (
+        {mode === null ? (
+          !error && <p className="muted">読み込み中…</p>
+        ) : mode === "password" ? (
+          <form
+            className="stack"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (email.trim() && password) login();
+            }}
+          >
+            <label className="login-field">
+              <span className="small muted">メールアドレス</span>
+              <input
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoFocus
+              />
+            </label>
+            <label className="login-field">
+              <span className="small muted">パスワード</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </label>
+            <button type="submit" className="btn primary login-btn" disabled={busy || !email.trim() || !password}>
+              {busy ? "確認しています…" : "ログイン"}
+            </button>
+            <p className="small muted">
+              パスワードを忘れたときや、ロックされたときは、
+              {portal === "company" ? "銀行の担当者" : "管理者"}に再設定を依頼してください。
+            </p>
+          </form>
+        ) : mode === "entra" ? (
           <button className="btn primary login-btn" disabled={busy} onClick={login}>
             {busy ? "Microsoft のログイン画面へ移動しています…" : "Microsoft アカウントでログイン"}
           </button>

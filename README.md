@@ -17,7 +17,7 @@
 | フロントエンド | Next.js 16（App Router）。図は自前の部品で描画 |
 | バックエンド | Python（FastAPI）＋ SQLAlchemy |
 | DB | 開発：SQLite（`backend/flow.db`）／本番：Azure Database for MySQL |
-| 認証 | 開発：画面右上でユーザーを切り替え／本番：Entra ID |
+| 認証 | バックエンドの `AUTH_MODE` で切り替え。`dev`：ユーザーを選ぶだけ（仮）／`password`：メールアドレスとパスワード（HttpOnly Cookie）／`entra`：Entra ID |
 
 `/api/*` へのリクエストは、Next.js が Python バックエンドへ転送します（`frontend/app/api/[...path]/route.ts`。転送先は環境変数 `BACKEND_URL`、未設定なら `http://localhost:8000`）。
 
@@ -152,7 +152,7 @@ AIが作ったテキストは業務の `hearing_notes` に保存されます（�
 3. **企業の担当者**：Entra ID B2B のゲストとして招待します。担当者は自社のMicrosoftアカウントでログインできます。アプリ側では、同じメールアドレスで「担当者」を登録しておきます。
 4. **設定**：
    - バックエンド：`AUTH_MODE=entra`、`ENTRA_TENANT_ID`、`ENTRA_API_CLIENT_ID`
-   - フロント：`NEXT_PUBLIC_AUTH_MODE=entra` と Entra ID の各ID
+   - フロント：Entra ID の各ID（ログインの方法は、バックエンドの `AUTH_MODE` を画面が読んで切り替える）
 5. **ホスティング**：App Service を2つ（Next.js 用、Python 用）用意するか、Container Apps にまとめます。フロント側の `BACKEND_URL` には、バックエンドのURLを設定します。
 
 ## フォルダ

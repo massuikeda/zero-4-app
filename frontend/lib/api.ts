@@ -100,8 +100,15 @@ export const api = {
   deleteCostItem: (id: number) => call(`/api/cost-items/${id}`, { method: "DELETE" }),
 
   users: (cid: number) => call<UserRow[]>(`/api/companies/${cid}/users`),
-  createUser: (b: { email: string; name: string; role: "member"; company_id: number }) =>
+  /** password は初期パスワード（AUTH_MODE=password のときは必須） */
+  createUser: (b: { email: string; name: string; role: "member"; company_id: number; password?: string }) =>
     call<UserRow>("/api/users", { body: b }),
+  /** 銀行担当者がパスワードを決め直す（ロックも解ける） */
+  resetUserPassword: (id: number, password: string) =>
+    call<UserRow>(`/api/users/${id}/password`, { method: "PUT", body: { password } }),
+  /** 自分のパスワードを変える */
+  changePassword: (current_password: string, new_password: string) =>
+    call("/api/auth/password", { method: "PUT", body: { current_password, new_password } }),
   deleteUser: (id: number) => call(`/api/users/${id}`, { method: "DELETE" }),
 };
 

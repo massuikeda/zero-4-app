@@ -1,7 +1,14 @@
 """ログインユーザーの特定と権限チェック。
 
-- AUTH_MODE=dev   : ヘッダー X-User-Email のユーザーとして扱う（開発・デモ用）
-- AUTH_MODE=entra : Entra ID のアクセストークンを検証し、メールアドレスでユーザーを特定
+- AUTH_MODE=dev      : ヘッダー X-User-Email のユーザーとして扱う（開発・デモ用。パスワードなし）
+- AUTH_MODE=password : メールアドレスとパスワードでログインする。ログイン状態は HttpOnly Cookie
+                       （画面のスクリプトからは読めない）に、署名付きで入れる。8時間で切れる
+- AUTH_MODE=entra    : Entra ID のアクセストークンを検証し、メールアドレスでユーザーを特定
+
+パスワード
+- そのままでは保存しない。scrypt（元に戻せない計算）で変換した値だけを保存する
+- 5回続けて間違えると15分ロックする（総当たり対策）
+- パスワードを変えると、それまでのログイン状態（ほかの端末も含む）は使えなくなる
 
 役割
 - admin （銀行担当者）: すべての企業・業務を見られる。企業・業務・図の候補・企業ユーザーの登録
@@ -14,9 +21,15 @@
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import os
+import secrets
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Cookie, Depends, Header, HTTPException, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -53,6 +66,111 @@ def _email_from_token(token: str) -> str:
     return email
 
 
+# ---------- パスワード ----------
+PASSWORD_MIN = 8
+PASSWORD_MAX = 128
+MAX_FAILED_LOGINS = 5
+LOCK_MINUTES = 15
+_SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 2**14, 8, 1
+
+
+def _b64(b: bytes) -> str:
+    return base64.b64encode(b).decode()
+
+
+def hash_password(password: str) -> str:
+    """保存用の値「scrypt$N$r$p$塩$結果」を作る（塩は毎回ランダム。同じパスワードでも値は毎回変わる）"""
+    salt = os.urandom(16)
+    h = hashlib.scrypt(password.encode(), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P, dklen=32)
+    return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${_b64(salt)}${_b64(h)}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        algo, n, r, p, salt, expected = stored.split("$")
+        if algo != "scrypt":
+            return False
+        h = hashlib.scrypt(password.encode(), salt=base64.b64decode(salt), n=int(n), r=int(r), p=int(p), dklen=32)
+        return hmac.compare_digest(h, base64.b64decode(expected))
+    except (ValueError, TypeError):
+        return False
+
+
+# 登録されていないメールアドレスでも同じだけ計算して、応答の速さから「登録の有無」が分からないようにする
+_DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
+
+
+def check_password_rule(password: str) -> None:
+    if not (PASSWORD_MIN <= len(password) <= PASSWORD_MAX):
+        raise HTTPException(422, f"パスワードは{PASSWORD_MIN}〜{PASSWORD_MAX}文字にしてください")
+    if password.strip() != password:
+        raise HTTPException(422, "パスワードの最初と最後に空白は使えません")
+
+
+def utcnow() -> datetime:
+    """DBに入れる時刻（タイムゾーンなしのUTC。SQLite と MySQL で同じ扱いにするため）"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def is_locked(user: User) -> bool:
+    return bool(user.locked_until and user.locked_until > utcnow())
+
+
+def set_password(user: User, password: str) -> None:
+    check_password_rule(password)
+    user.password_hash = hash_password(password)
+    user.failed_logins = 0
+    user.locked_until = None
+
+
+# ---------- ログイン状態（Cookie）----------
+SESSION_COOKIE = "mieru_session"
+SESSION_HOURS = 8
+# AUTH_SECRET が未設定のとき（ローカル）は、起動のたびに作る鍵を使う
+_SECRET = settings.auth_secret or secrets.token_urlsafe(32)
+
+
+def _password_version(user: User) -> str:
+    """パスワードが変わったら変わる印。ログイン状態に入れておき、パスワード変更前のログイン状態を無効にする"""
+    return hashlib.sha256(user.password_hash.encode()).hexdigest()[:16]
+
+
+def set_session(response: Response, user: User) -> None:
+    import jwt
+
+    t = datetime.now(timezone.utc)
+    token = jwt.encode(
+        {"sub": str(user.id), "pv": _password_version(user), "iat": t, "exp": t + timedelta(hours=SESSION_HOURS)},
+        _SECRET,
+        algorithm="HS256",
+    )
+    response.set_cookie(
+        SESSION_COOKIE, token, max_age=SESSION_HOURS * 3600, path="/",
+        httponly=True, secure=settings.cookie_secure, samesite="strict",
+    )
+
+
+def clear_session(response: Response) -> None:
+    response.delete_cookie(SESSION_COOKIE, path="/", httponly=True, secure=settings.cookie_secure, samesite="strict")
+
+
+def _user_from_session(db: Session, token: str | None) -> User:
+    import jwt
+
+    if not token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインしてください")
+    try:
+        claims = jwt.decode(token, _SECRET, algorithms=["HS256"], options={"require": ["sub", "exp"]})
+    except jwt.ExpiredSignatureError as e:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインの有効期限が切れました。もう一度ログインしてください") from e
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインしてください") from e
+    user = db.get(User, int(claims["sub"]))
+    if not user or not user.password_hash or claims.get("pv") != _password_version(user):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインし直してください")
+    return user
+
+
 PORTAL_ROLE = {"bank": "admin", "company": "member"}
 PORTAL_ERROR = {
     "bank": "このアカウントは企業の方のアカウントです。「企業の方のログイン」からログインしてください",
@@ -69,8 +187,14 @@ def current_user(
     authorization: str | None = Header(default=None),
     x_user_email: str | None = Header(default=None),
     x_login_portal: str | None = Header(default=None),
+    mieru_session: str | None = Cookie(default=None),
     db: Session = Depends(get_db),
 ) -> User:
+    if settings.auth_mode == "password":
+        user = _user_from_session(db, mieru_session)
+        if x_login_portal in PORTAL_ROLE and user.role != PORTAL_ROLE[x_login_portal]:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, PORTAL_ERROR[x_login_portal])
+        return user
     if settings.auth_mode == "entra":
         if not authorization or not authorization.lower().startswith("bearer "):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ログインが必要です")

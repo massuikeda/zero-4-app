@@ -21,7 +21,9 @@ GitHub の Actions 画面から「Run workflow」で手動実行もできます�
 - そのため、**本物の企業のデータは、ログインを入れるまで登録しないでください**（デモ用のデータだけにする）。
 - URLは必要な人にだけ伝えてください。
 
-Entra ID のログインに切り替えるとき（機能追加のあと）は、このページの末尾「Entra ID のログインに切り替えるとき」の設定を入れます。
+メールアドレスとパスワードのログインは作ってあります。切り替えるときは、このページの末尾「パスワードのログインに切り替える」の手順で設定します。
+
+> 目標の構成（WAF・プライベート接続・Key Vault など）への移行は、`docs/TARGET.md` に段階ごとにまとめています。
 
 ## 1. Azure に用意するもの
 
@@ -122,13 +124,43 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 | workflow の「App Service にデプロイ」で失敗（401 や Publish profile のエラー） | 手順2の「SCM 基本認証の発行資格情報」がオンか、Secrets に発行プロファイルの中身を全部貼ったか、変数の App Service の名前が合っているか |
 | フロントエンドが「Application Error」 | 手順4のスタートアップ コマンド。「ログ ストリーム」でエラーを確認 |
 | 画面は出るが「サーバーに接続できませんでした」 | フロントエンドのアプリ設定 `BACKEND_URL`、バックエンドが起動しているか（`<BACKEND_URL>/api/health` を開くと `{"status":"ok"}` と出る） |
-| バックエンドが起動しない | 手順5のスタートアップ コマンド・`SCM_DO_BUILD_DURING_DEPLOYMENT`・`ALLOW_DEV_AUTH`・`DB_BACKEND` と `DB_HOST` など。「ログ ストリーム」を確認 |
+| バックエンドが起動しない | 手順5のスタートアップ コマンド・`SCM_DO_BUILD_DURING_DEPLOYMENT`・`ALLOW_DEV_AUTH`（`AUTH_MODE=password` なら `AUTH_SECRET` が32文字以上か）・`DB_BACKEND` と `DB_HOST` など。「ログ ストリーム」を確認 |
+
+## パスワードのログインに切り替える
+
+メールアドレスとパスワードでログインします。ログイン状態は、画面のスクリプトからは読めない Cookie（HttpOnly）に入れ、8時間で切れます。パスワードは元に戻せない形（scrypt）で保存します。5回続けて間違えると15分ロックします。
+
+**画面（フロントエンド）の設定とデプロイのし直しはいりません。** 画面は、バックエンドの設定を読んでログイン画面を切り替えます。
+
+1. **最初の銀行担当者にパスワードを決める**（ローカルPCの backend フォルダで、仮想環境を有効にして実行。パスワードは画面に表示されない入力欄で2回聞かれます）
+   ```
+   python set_password.py <銀行担当者のメールアドレス> --mysql
+   ```
+   - `--mysql` を付けると、`.env` の `DB_HOST` などを使って Azure の MySQL に書き込みます（パスワードの列もこのとき足されます）
+   - まだ登録のない人は `--create --name "名前"` を付けると、銀行担当者として作ります
+   - MySQL のファイアウォールで、ローカルPCのIPを許可しておく必要があります（移行のときと同じ）
+2. **新しいバックエンドをデプロイする**（このコードを push する）
+3. **バックエンドのアプリ設定**を変えて保存（保存すると再起動します）
+
+   | 名前 | 値 |
+   |---|---|
+   | `AUTH_MODE` | `password` |
+   | `AUTH_SECRET` | 32文字以上のランダムな文字列（ログイン状態の署名に使う鍵）。ローカルPCで `python -c "import secrets; print(secrets.token_urlsafe(48))"` を実行して作る。**チャットやGitHubには貼らない** |
+   | `ALLOW_DEV_AUTH` | **消す** |
+
+4. 「銀行担当者のログイン」から、1. で決めたパスワードでログインできるか確認する
+5. 企業の方は、銀行担当者が企業ページの「企業ユーザー」タブで、追加するときに初期パスワードを決めて本人に伝えます（すでに登録済みの人は「再設定」から決める）。本人はログイン後、右上の「パスワード変更」から変えられます
+
+メモ
+- `AUTH_SECRET` を変えると、全員のログインが切れます（ログインし直せば使えます）。漏れたと思ったら変えてください
+- パスワードを忘れた・ロックされたときは、銀行担当者が「再設定」で決め直します（ロックも解けます）。銀行担当者自身は `set_password.py` で決め直します
+- 戻すとき（仮のログイン）は `AUTH_MODE=dev` と `ALLOW_DEV_AUTH=true` に戻します
 
 ## Entra ID のログインに切り替えるとき（機能追加のあと）
 
 | 場所 | 設定 |
 |---|---|
-| GitHub の Variables | `NEXT_PUBLIC_AUTH_MODE`=`entra`、`NEXT_PUBLIC_ENTRA_TENANT_ID`、`NEXT_PUBLIC_ENTRA_SPA_CLIENT_ID`、`NEXT_PUBLIC_ENTRA_API_SCOPE`（`api://<API用のID>/access_as_user`）→ フロントエンドを再デプロイ（これらはビルドのときに画面へ埋め込まれるため） |
+| GitHub の Variables | `NEXT_PUBLIC_ENTRA_TENANT_ID`、`NEXT_PUBLIC_ENTRA_SPA_CLIENT_ID`、`NEXT_PUBLIC_ENTRA_API_SCOPE`（`api://<API用のID>/access_as_user`）→ フロントエンドを再デプロイ（これらはビルドのときに画面へ埋め込まれるため） |
 | バックエンドのアプリ設定 | `AUTH_MODE`=`entra`、`ENTRA_TENANT_ID`、`ENTRA_API_CLIENT_ID` を入れ、`ALLOW_DEV_AUTH` を消す |
 | Entra ID（SPA用のアプリ登録） | リダイレクトURIに `https://<フロントエンドのURL>/redirect` を追加 |
 | DB | 最初の銀行担当者を1件登録：`INSERT INTO users (email, name, role) VALUES ('メールアドレス', '名前', 'admin');` |

@@ -107,6 +107,10 @@ export interface Me {
 
 export interface UserRow extends Me {
   business_ids: number[];
+  /** パスワードが設定済みか */
+  has_password?: boolean;
+  /** 続けて間違えたためロック中か */
+  locked?: boolean;
 }
 
 export interface Company {

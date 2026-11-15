@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +12,10 @@ from sqlalchemy.orm import Session
 
 from . import ai, render
 from .auth import can_see_company, current_user, find_user, get_business_or_404, require_admin
+from .auth import (  # noqa: I001
+    _DUMMY_HASH, LOCK_MINUTES, MAX_FAILED_LOGINS, PORTAL_ERROR, PORTAL_ROLE, clear_session, is_locked, set_password,
+    set_session, utcnow, verify_password,
+)
 from .config import settings
 from .db import CostItem  # noqa: I001
 from .db import Business, Company, FlowDoc, Resource, SessionLocal, User, get_db, init_db, now
@@ -20,6 +25,7 @@ from .schemas import (
     FlowSaveIn, FlowsOut, HearingFormatIn, HearingFormatOut, Me, RenderIn, ResourceIn, ResourceOut, TobeSuggestOut,
     UserIn, UserOut,
 )
+from .schemas import LoginIn, PasswordChangeIn, PasswordResetIn  # noqa: I001
 
 
 @asynccontextmanager
@@ -119,6 +125,69 @@ def dev_users(role: str | None = None, db: Session = Depends(get_db)):
 @app.get("/api/me", response_model=Me)
 def me(user: User = Depends(current_user)):
     return user
+
+
+# ---------- ログイン（AUTH_MODE=password）----------
+WRONG_LOGIN = "メールアドレスかパスワードが違います"
+
+
+def _need_password_mode():
+    if settings.auth_mode != "password":
+        raise HTTPException(404)
+
+
+def _locked_message(user: User) -> str:
+    mins = max(1, int((user.locked_until - utcnow()).total_seconds() // 60) + 1)
+    return f"パスワードを{MAX_FAILED_LOGINS}回続けて間違えたため、ロックしています。約{mins}分後にもう一度お試しください"
+
+
+@app.post("/api/auth/login", response_model=Me)
+def login(body: LoginIn, response: Response, db: Session = Depends(get_db)):
+    _need_password_mode()
+    user = find_user(db, body.email)
+    if user and is_locked(user):
+        raise HTTPException(429, _locked_message(user))
+    # 登録がない・パスワード未設定でも同じ計算をして、同じ言葉で断る（登録の有無を分からなくする）
+    ok = verify_password(body.password, (user.password_hash if user else "") or _DUMMY_HASH)
+    if not user or not user.password_hash or not ok:
+        if user:
+            user.failed_logins += 1
+            if user.failed_logins >= MAX_FAILED_LOGINS:
+                user.failed_logins = 0
+                user.locked_until = utcnow() + timedelta(minutes=LOCK_MINUTES)
+                db.commit()
+                raise HTTPException(429, _locked_message(user))
+            db.commit()
+        raise HTTPException(401, WRONG_LOGIN)
+    if user.role != PORTAL_ROLE[body.portal]:
+        raise HTTPException(403, PORTAL_ERROR[body.portal])
+    user.failed_logins = 0
+    user.locked_until = None
+    db.commit()
+    set_session(response, user)
+    return user
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response):
+    clear_session(response)
+    return {"ok": True}
+
+
+@app.put("/api/auth/password")
+def change_password(
+    body: PasswordChangeIn, response: Response, user: User = Depends(current_user), db: Session = Depends(get_db)
+):
+    """自分のパスワードを変える（いまのパスワードの確認つき）。ほかの端末のログイン状態は使えなくなる"""
+    _need_password_mode()
+    if not verify_password(body.current_password, user.password_hash or _DUMMY_HASH):
+        raise HTTPException(422, "いまのパスワードが違います")
+    if body.new_password == body.current_password:
+        raise HTTPException(422, "いまと違うパスワードにしてください")
+    set_password(user, body.new_password)
+    db.commit()
+    set_session(response, user)  # この端末はログインしたままにする
+    return {"ok": True}
 
 
 # ---------- 企業 ----------
@@ -479,6 +548,8 @@ def delete_cost_item(iid: int, _: User = Depends(require_admin), db: Session = D
 def _user_out(u: User) -> UserOut:
     o = UserOut.model_validate(u)
     o.business_ids = [b.id for b in u.businesses]
+    o.has_password = bool(u.password_hash)
+    o.locked = is_locked(u)
     return o
 
 
@@ -496,7 +567,11 @@ def create_user(body: UserIn, _: User = Depends(require_admin), db: Session = De
         raise HTTPException(422, "企業が見つかりません")
     if find_user(db, body.email):
         raise HTTPException(409, "このメールアドレスは登録済みです")
-    u = User(**body.model_dump())
+    u = User(**body.model_dump(exclude={"password"}))
+    if body.password:
+        set_password(u, body.password)
+    elif settings.auth_mode == "password":
+        raise HTTPException(422, "初期パスワードを入れてください")
     db.add(u)
     db.commit()
     return _user_out(u)
@@ -509,8 +584,19 @@ def update_user(uid: int, body: UserIn, _: User = Depends(require_admin), db: Se
         raise HTTPException(404, "ユーザーが見つかりません")
     if u.company_id != body.company_id:
         u.businesses = []  # 企業が変わったら割り当てを外す
-    for k, v in body.model_dump().items():
+    for k, v in body.model_dump(exclude={"password"}).items():
         setattr(u, k, v)
+    db.commit()
+    return _user_out(u)
+
+
+@app.put("/api/users/{uid}/password", response_model=UserOut)
+def reset_password(uid: int, body: PasswordResetIn, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """忘れたとき・ロックを解きたいときに、銀行担当者がパスワードを決め直す（ロックも解ける）"""
+    u = db.get(User, uid)
+    if not u:
+        raise HTTPException(404, "ユーザーが見つかりません")
+    set_password(u, body.password)
     db.commit()
     return _user_out(u)
 

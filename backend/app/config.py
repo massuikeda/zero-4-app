@@ -43,7 +43,12 @@ class Settings:
     database_url = _database_url()
     # MySQL へ暗号化（TLS）してつなぐ。Azure では必須。手元の MySQL で試すときだけ DB_SSL=false
     db_ssl = _bool("DB_SSL", True)
-    auth_mode = os.getenv("AUTH_MODE", "dev")  # dev / entra
+    auth_mode = os.getenv("AUTH_MODE", "dev").strip().lower()  # dev / password / entra
+    # AUTH_MODE=password のとき、ログイン状態（Cookie）に付ける署名の鍵。32文字以上のランダムな文字列。
+    # 未設定のときは起動のたびに作り直す（ローカル用。再起動するとログインし直しになる）。Azure では必須
+    auth_secret = os.getenv("AUTH_SECRET", "").strip()
+    # Cookie を HTTPS のときだけ送る印（Secure）。Azure では既定でオン。ローカル（http）ではオフ
+    cookie_secure = _bool("COOKIE_SECURE", bool(os.getenv("WEBSITE_SITE_NAME")))
     seed_demo = _bool("SEED_DEMO", True)
     tenant_id = os.getenv("ENTRA_TENANT_ID", "")
     api_client_id = os.getenv("ENTRA_API_CLIENT_ID", "")
@@ -58,11 +63,16 @@ class Settings:
 
 settings = Settings()
 
+if settings.auth_mode not in ("dev", "password", "entra"):
+    raise RuntimeError(f"AUTH_MODE は dev・password・entra のどれかにしてください（いまは {settings.auth_mode}）")
+
 # 開発用のログイン（X-User-Email を送るだけで誰にでもなれる）のまま Azure に出さないための安全装置。
 # WEBSITE_SITE_NAME は Azure App Service が自動で入れる値（＝Azure の上で動いている印）。
 # 検証用にどうしても dev で動かすときだけ、アプリ設定に ALLOW_DEV_AUTH=true を入れる。
-if os.getenv("WEBSITE_SITE_NAME") and settings.auth_mode != "entra" and not _bool("ALLOW_DEV_AUTH"):
-    raise RuntimeError(
-        "AUTH_MODE=entra が設定されていません。App Service のアプリ設定に AUTH_MODE=entra・"
-        "ENTRA_TENANT_ID・ENTRA_API_CLIENT_ID を入れてください"
-    )
+if os.getenv("WEBSITE_SITE_NAME"):
+    if settings.auth_mode == "dev" and not _bool("ALLOW_DEV_AUTH"):
+        raise RuntimeError(
+            "AUTH_MODE が設定されていません。App Service のアプリ設定に AUTH_MODE=password と AUTH_SECRET を入れてください"
+        )
+    if settings.auth_mode == "password" and len(settings.auth_secret) < 32:
+        raise RuntimeError("AUTH_MODE=password には、32文字以上の AUTH_SECRET（アプリ設定）が必要です")

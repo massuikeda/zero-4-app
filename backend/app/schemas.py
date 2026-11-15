@@ -116,6 +116,8 @@ class UserOut(_Out):
     role: str
     company_id: Optional[int]
     business_ids: list[int] = []
+    has_password: bool = False  # パスワードが設定済みか
+    locked: bool = False  # 続けて間違えたためロック中か
 
 
 class BusinessOut(_Out):
@@ -176,6 +178,23 @@ class UserIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     role: Literal["admin", "member"] = "member"
     company_id: Optional[int] = None
+    # 初期パスワード（登録のときだけ。銀行担当者が決めて本人に伝える）。長さの確認は auth.check_password_rule
+    password: Optional[str] = Field(None, max_length=200)
+
+
+class LoginIn(BaseModel):
+    email: str = Field(..., max_length=320)
+    password: str = Field(..., max_length=200)
+    portal: Literal["bank", "company"]
+
+
+class PasswordChangeIn(BaseModel):
+    current_password: str = Field(..., max_length=200)
+    new_password: str = Field(..., max_length=200)
+
+
+class PasswordResetIn(BaseModel):
+    password: str = Field(..., max_length=200)
 
 
 class BusinessIn(BaseModel):
