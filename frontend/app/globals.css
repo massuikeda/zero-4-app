@@ -1,7 +1,10 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #f4f5f7;
+  /* 画面のいちばん外側の背景（濃い青）。変えるときはここの色だけ直す。元の薄いグレーに戻すなら #f4f5f7 */
+  --bg: #14315a;
+  /* 中身をのせる面の色（文字が読めるように、明るい色のままにする） */
+  --sheet: #f4f5f7;
   --card: #ffffff;
   --ink: #1d2433;
   --muted: #6b7385;
@@ -49,7 +52,13 @@ input[readonly], select:disabled { background: #f8f9fb; }
 .dev-badge { background: var(--warn); color: #fff; font-size: 12px; padding: 2px 8px; border-radius: 99px; }
 .who { font-size: 13px; display: flex; align-items: center; gap: 6px; }
 .who em { font-style: normal; font-size: 11px; border: 1px solid var(--line); color: var(--muted); border-radius: 99px; padding: 0 8px; }
-.page { max-width: 1400px; margin: 0 auto; padding: 20px 24px 80px; }
+/* 中身は明るい面（--sheet）にのせる。外側の濃い青の上に、文字を直接は置かない */
+.page {
+  box-sizing: border-box; width: min(1400px, calc(100% - 32px)); margin: 20px auto 40px; padding: 20px 24px 40px;
+  background: var(--sheet); border-radius: 14px; min-height: calc(100vh - 140px);
+}
+/* ログイン画面は、濃い青の上にカードだけを置く */
+.page:has(.login-wrap) { background: transparent; min-height: 0; padding-top: 0; }
 
 .stack { display: flex; flex-direction: column; gap: 14px; }
 .row { display: flex; align-items: center; }

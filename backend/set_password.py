@@ -26,6 +26,8 @@ def main() -> int:
     args = ap.parse_args()
     if args.mysql:
         os.environ["DB_BACKEND"] = "mysql"
+        # .env に DATABASE_URL（ローカルの SQLite 用）が書いてあっても、そちらを使わず DB_HOST などでつなぐ
+        os.environ["DATABASE_URL"] = ""
     os.environ.setdefault("SEED_DEMO", "false")
 
     from fastapi import HTTPException
