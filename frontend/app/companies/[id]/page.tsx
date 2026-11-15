@@ -8,9 +8,9 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { formatEmployees } from "@/lib/company";
 import { formatMinutes } from "@/lib/flow";
 import { api } from "@/lib/api";
-import { PLAN_LABEL, RESOURCE_KINDS, type Business, type Company, type Resource, type ResourceKind, type UserRow } from "@/lib/types";
+import { PLAN_LABEL, type Business, type Company, type Resource, type UserRow } from "@/lib/types";
 
-type Tab = "businesses" | "resources" | "users";
+type Tab = "businesses" | "users";
 
 export default function CompanyPage() {
   const { id } = useParams<{ id: string }>();
@@ -63,6 +63,7 @@ export default function CompanyPage() {
               .join("・")}
           </p>
         </div>
+        <WageEditor company={company} isAdmin={isAdmin} onSaved={setCompany} guard={guard} />
       </div>
       {error && <div className="alert">{error}</div>}
 
@@ -71,7 +72,6 @@ export default function CompanyPage() {
           {(
             [
               ["businesses", `業務一覧（${businesses.length}）`],
-              ["resources", `図の候補（部署・道具）（${resources.length}）`],
               ["users", `企業ユーザー（${users.length}）`],
             ] as const
           ).map(([k, label]) => (
@@ -92,20 +92,53 @@ export default function CompanyPage() {
           guard={guard}
         />
       )}
-      {tab === "resources" && isAdmin && <ResourceManager cid={cid} resources={resources} onChange={load} guard={guard} />}
       {tab === "users" && isAdmin && <CompanyUserManager cid={cid} users={users} onChange={load} guard={guard} />}
     </div>
   );
 }
 
-/** 画面に出す種類名（データ上の値は変えない。「担当者」はログインユーザーと紛らわしいので「役割」と表示） */
-const KIND_LABEL: Record<ResourceKind, string> = {
-  部署: "部署",
-  担当者: "役割",
-  取引先: "取引先",
-  システム: "システム",
-  帳票: "帳票",
-};
+/** 時給（企業ごとに1つ）。TO-BEの削減時間を金額に直すのに使う。設定は銀行担当者 */
+function WageEditor({
+  company, isAdmin, onSaved, guard,
+}: { company: Company; isAdmin: boolean; onSaved: (c: Company) => void; guard: Guard }) {
+  const [value, setValue] = useState(company.hourly_wage == null ? "" : String(company.hourly_wage));
+  const t = value.trim().replace(/[,，]/g, "");
+  const wage = t === "" ? null : /^\d+$/.test(t) ? Number(t) : undefined; // undefined＝入力ミス
+  const changed = wage !== undefined && wage !== company.hourly_wage;
+  if (!isAdmin) return null; // 費用対効果は銀行担当者だけが扱う
+  return (
+    <form
+      className="wage-edit"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!changed) return;
+        guard(async () =>
+          onSaved(
+            await api.updateCompany(company.id, {
+              name: company.name, industry: company.industry, employees: company.employees, note: company.note, hourly_wage: wage,
+            }),
+          ),
+        );
+      }}
+    >
+      <label>
+        <span className="small muted">時給（円）</span>
+        <input
+          inputMode="numeric"
+          placeholder="例：2500"
+          value={value}
+          aria-invalid={wage === undefined}
+          title="TO-BEの削減時間を金額（月の削減額）に直すのに使います"
+          onChange={(e) => setValue(e.target.value)}
+        />
+      </label>
+      <button type="submit" className="btn ghost" disabled={!changed}>
+        保存
+      </button>
+      {wage === undefined && <span className="small error-text">0以上の整数で入力してください</span>}
+    </form>
+  );
+}
 
 type Guard = (fn: () => Promise<unknown>) => Promise<void>;
 
@@ -227,70 +260,6 @@ function BusinessList({
           </button>
         </div>
       )}
-    </div>
-  );
-}
-
-function ResourceManager({
-  cid, resources, onChange, guard,
-}: { cid: number; resources: Resource[]; onChange: () => void; guard: Guard }) {
-  const [inputs, setInputs] = useState<Record<string, string>>({});
-  const hint: Record<ResourceKind, string> = {
-    部署: "スイムレーンに使えます",
-    担当者: "部署の中の役割（例：経理担当）。スイムレーンに使えます",
-    取引先: "社外の列（取引先など）",
-    システム: "作業の「道具（札）」で選べます",
-    帳票: "作業の「道具（札）」で選べます。紙として集計されます",
-  };
-  return (
-    <div className="res-grid">
-      {RESOURCE_KINDS.map((kind) => (
-        <div className="card" key={kind}>
-          <h3>{KIND_LABEL[kind]}</h3>
-          <p className="muted small">{hint[kind]}</p>
-          <ul className="res-list">
-            {resources
-              .filter((r) => r.kind === kind)
-              .map((r) => (
-                <li key={r.id}>
-                  <input
-                    defaultValue={r.name}
-                    onBlur={(e) =>
-                      e.target.value.trim() &&
-                      e.target.value !== r.name &&
-                      guard(() => api.updateResource(r.id, { ...r, name: e.target.value.trim() }).then(onChange))
-                    }
-                  />
-                  <button
-                    className="btn-delete"
-                    title="削除"
-                    onClick={() =>
-                      confirm(`「${r.name}」を削除しますか？`) && guard(() => api.deleteResource(r.id).then(onChange))
-                    }
-                  >
-                    削除
-                  </button>
-                </li>
-              ))}
-          </ul>
-          <div className="row gap">
-            <input
-              placeholder={`${KIND_LABEL[kind]}を追加`}
-              value={inputs[kind] ?? ""}
-              onChange={(e) => setInputs({ ...inputs, [kind]: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key !== "Enter" || !(inputs[kind] ?? "").trim()) return;
-                guard(async () => {
-                  await api.createResource(cid, { kind, name: inputs[kind].trim() });
-                  setInputs({ ...inputs, [kind]: "" });
-                  onChange();
-                });
-              }}
-            />
-          </div>
-        </div>
-      ))}
-      <p className="muted small full">※ 名前を変えても、作成済みのフローの表記は変わりません。</p>
     </div>
   );
 }

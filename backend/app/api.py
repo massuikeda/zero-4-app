@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -11,8 +12,9 @@ from sqlalchemy.orm import Session
 from . import ai, render
 from .auth import can_see_company, current_user, find_user, get_business_or_404, require_admin
 from .config import settings
+from .db import CostItem  # noqa: I001
 from .db import Business, Company, FlowDoc, Resource, SessionLocal, User, get_db, init_db, now
-from .schemas import PLANS, AdoptIn, plan_kind  # noqa: I001
+from .schemas import PLANS, AdoptIn, CostItemIn, CostItemOut, plan_kind  # noqa: I001
 from .schemas import (
     AssignIn, BusinessIn, BusinessNotesIn, BusinessOut, CompanyIn, CompanyOut, Flow, FlowDocOut, FlowKind,
     FlowSaveIn, FlowsOut, HearingFormatIn, HearingFormatOut, Me, RenderIn, ResourceIn, ResourceOut, TobeSuggestOut,
@@ -162,15 +164,56 @@ def delete_company(cid: int, user: User = Depends(require_admin), db: Session = 
     return {"deleted": cid}
 
 
-# ---------- リソース ----------
+# ---------- 図の候補（担当・道具）----------
+# 候補は手で登録しない。その企業の図（AS-IS と TO-BE の3案）に出てきた担当と道具を、そのまま候補にする。
+# AIが作った図に出てきた名前が、次に図を作る・直すときの候補になる（名前のゆれを防ぐ）。
+_OUTSIDE = re.compile(r"取引先|顧客|お客|得意先|仕入|業者|外注|委託先|メーカー|問屋")
+# 紙として数える道具（画面の「紙」の集計に使われる）。伝票・帳票のほか、請求書・納品書などの「〇〇書」
+_PAPER = re.compile(r"紙|伝票|帳票|印刷|書類|手書き|(注文|発注|請求|納品|領収|精算|申請|見積|明細|契約|報告|依頼|指示|検収)書")
+_FLOW_KINDS = ("asis", "tobe_ume", "tobe_take", "tobe_matsu")
+
+
+def _candidates(db: Session, company_id: int) -> list[ResourceOut]:
+    """企業の図に出てきた担当（部署・取引先）と道具（システム・帳票）の一覧。出てきた順。保存はしない"""
+    flows = db.scalars(
+        select(FlowDoc).join(Business).where(Business.company_id == company_id, FlowDoc.kind.in_(_FLOW_KINDS))
+        .order_by(FlowDoc.business_id, FlowDoc.id)
+    ).all()
+    out: list[ResourceOut] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(group: str, kind: str, name: object) -> None:
+        name = str(name or "").strip()
+        if not name or (group, name) in seen:
+            return
+        seen.add((group, name))
+        # id は画面の一覧用の通し番号（DBの行ではないので負の数にしておく）
+        out.append(ResourceOut(id=-(len(out) + 1), company_id=company_id, kind=kind, name=name, note="", sort=len(out)))
+
+    for f in flows:
+        data = f.data or {}
+        steps = data.get("steps") or []
+        for lane in [*(data.get("lanes") or []), *(st.get("lane") for st in steps)]:
+            add("lane", "取引先" if _OUTSIDE.search(str(lane or "")) else "部署", lane)
+        for st in steps:
+            tool = st.get("tool")
+            add("tool", "帳票" if _PAPER.search(str(tool or "")) else "システム", tool)
+    return out
+
+
+def _lanes_and_tools(db: Session, company_id: int) -> tuple[list[str], list[str]]:
+    cs = _candidates(db, company_id)
+    return ([c.name for c in cs if c.kind in ("部署", "担当者", "取引先")], [c.name for c in cs if c.kind in ("システム", "帳票")])
+
+
 @app.get("/api/companies/{cid}/resources", response_model=list[ResourceOut])
 def list_resources(cid: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """図の候補。その企業の図に出てきた担当と道具（手で登録したものではない）"""
     _company_or_404(db, user, cid)
-    return db.scalars(
-        select(Resource).where(Resource.company_id == cid).order_by(Resource.kind, Resource.sort, Resource.id)
-    ).all()
+    return _candidates(db, cid)
 
 
+# 以下の登録・変更・削除は、以前「図の候補」を手で登録していたころのAPI。画面からは使っていない（候補にも出ない）
 @app.post("/api/companies/{cid}/resources", response_model=ResourceOut)
 def create_resource(cid: int, body: ResourceIn, user: User = Depends(require_admin), db: Session = Depends(get_db)):
     _company_or_404(db, user, cid)
@@ -247,9 +290,7 @@ def update_notes(bid: int, body: BusinessNotesIn, user: User = Depends(current_u
 def format_hearing(bid: int, body: HearingFormatIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """ヒアリングボックスの記録を、Azure OpenAI で「AS-ISの形式」に整える（保存はしない。画面で確認してから保存）"""
     b = get_business_or_404(db, user, bid)
-    rs = db.scalars(select(Resource).where(Resource.company_id == b.company_id).order_by(Resource.sort, Resource.id)).all()
-    lanes = [r.name for r in rs if r.kind in ("部署", "担当者", "取引先")]
-    tools = [r.name for r in rs if r.kind in ("システム", "帳票")]
+    lanes, tools = _lanes_and_tools(db, b.company_id)
     try:
         text = ai.format_hearing(body.raw, b.name, lanes, tools)
     except ai.AIError as e:
@@ -265,10 +306,11 @@ def suggest_tobe(bid: int, user: User = Depends(current_user), db: Session = Dep
     asis = {f.kind: f for f in b.flows}.get("asis")
     if not asis:
         raise HTTPException(422, "先にAS-ISを作成して保存してください")
-    rs = db.scalars(select(Resource).where(Resource.company_id == b.company_id).order_by(Resource.sort, Resource.id)).all()
-    tools = [r.name for r in rs if r.kind in ("システム", "帳票")]
+    _, tools = _lanes_and_tools(db, b.company_id)
+    # 単価表の名前を渡し、お金のかかる導入物はその中から選ばせる（金額はAIに決めさせない）
+    cost_names = list(db.scalars(select(CostItem.name).order_by(CostItem.sort, CostItem.id)))
     try:
-        return ai.suggest_tobe(Flow.model_validate(asis.data), b.name, b.frequency, tools)
+        return ai.suggest_tobe(Flow.model_validate(asis.data), b.name, b.frequency, tools, cost_names)
     except ai.AIError as e:
         raise HTTPException(e.status, str(e)) from e
 
@@ -379,6 +421,58 @@ def export_drawio(bid: int, kind: FlowKind, user: User = Depends(current_user), 
 @app.post("/api/render/drawio")
 def render_drawio(body: RenderIn, _: User = Depends(current_user)):
     return Response(render.to_drawio(body.flow, body.title), media_type="application/xml")
+
+
+# ---------- 単価表（全企業共通。見るのも編集するのも銀行担当者だけ）----------
+@app.get("/api/cost-items", response_model=list[CostItemOut])
+def list_cost_items(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    return db.scalars(select(CostItem).order_by(CostItem.sort, CostItem.id)).all()
+
+
+def _cost_name_taken(db: Session, name: str, except_id: int | None = None) -> bool:
+    q = select(CostItem).where(CostItem.name == name)
+    if except_id is not None:
+        q = q.where(CostItem.id != except_id)
+    return db.scalar(q) is not None
+
+
+@app.post("/api/cost-items", response_model=CostItemOut)
+def create_cost_item(body: CostItemIn, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    data = {**body.model_dump(), "name": body.name.strip()}
+    if not data["name"]:
+        raise HTTPException(422, "名前を入力してください")
+    if _cost_name_taken(db, data["name"]):
+        raise HTTPException(409, "同じ名前がすでにあります")
+    item = CostItem(**data)
+    db.add(item)
+    db.commit()
+    return item
+
+
+@app.put("/api/cost-items/{iid}", response_model=CostItemOut)
+def update_cost_item(iid: int, body: CostItemIn, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(CostItem, iid)
+    if not item:
+        raise HTTPException(404, "単価表の項目が見つかりません")
+    data = {**body.model_dump(), "name": body.name.strip()}
+    if not data["name"]:
+        raise HTTPException(422, "名前を入力してください")
+    if _cost_name_taken(db, data["name"], except_id=iid):
+        raise HTTPException(409, "同じ名前がすでにあります")
+    for k, v in data.items():
+        setattr(item, k, v)
+    db.commit()
+    return item
+
+
+@app.delete("/api/cost-items/{iid}")
+def delete_cost_item(iid: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(CostItem, iid)
+    if not item:
+        raise HTTPException(404, "単価表の項目が見つかりません")
+    db.delete(item)
+    db.commit()
+    return {"deleted": iid}
 
 
 # ---------- ユーザー（管理者のみ）----------

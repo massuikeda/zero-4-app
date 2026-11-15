@@ -853,7 +853,7 @@ export const FlowBoard = forwardRef<HTMLDivElement, Props>(function FlowBoard(
   );
 });
 
-/** リソースから選ぶか、名前を入れて列を追加するフォーム */
+/** この企業の図に出てきた担当から選ぶか、名前を入れて列を追加するフォーム */
 function AddLaneForm({
   resources, lanes, onAdd,
 }: { resources: Resource[]; lanes: string[]; onAdd: (name: string) => void }) {
@@ -863,7 +863,7 @@ function AddLaneForm({
     .map((r) => r.name);
   return (
     <div className="fb-addlane-form">
-        {candidates.length === 0 && <p className="insp-note">「図の候補」に登録した部署・役割・取引先はすべて追加済みです。名前を入れて追加できます。</p>}
+        {candidates.length === 0 && <p className="insp-note">この企業の図に出てきた担当は、すべて追加済みです。名前を入れて追加できます。</p>}
         {candidates.map((n) => (
           <button key={n} className="chip-btn" onClick={() => onAdd(n)}>
             ＋ {n}

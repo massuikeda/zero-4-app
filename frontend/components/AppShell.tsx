@@ -83,6 +83,11 @@ function Shell({ children }: { children: React.ReactNode }) {
           )}
           {me && (
             <>
+              {me.role === "admin" && (
+                <Link href="/settings/costs" className="top-link" title="TO-BEの案の費用（概算）に使う、全企業共通の単価表">
+                  単価表
+                </Link>
+              )}
               <span className="who">
                 {me.name}
                 <em>{ROLE_LABEL[me.role] ?? me.role}</em>

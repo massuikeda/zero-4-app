@@ -52,6 +52,8 @@ class Flow(BaseModel):
     # TO-BEの案の説明（AS-ISでは使わない）
     summary: str = Field("", max_length=300)                 # この案の要約
     needs: list[str] = Field(default_factory=list, max_length=10)  # 導入・準備が必要なもの
+    # お金のかかる導入物（単価表の名前。単価表にない名前は、画面で「要見積もり」になる）
+    cost_items: list[str] = Field(default_factory=list, max_length=20)
     # なくした作業（排除）の理由。作業ID → 何を使って、どうなくすか（図から消える作業なので、ここに残す）
     removed_notes: dict[str, str] = Field(default_factory=dict)
 
@@ -93,6 +95,7 @@ class CompanyOut(_Out):
     name: str
     industry: str = ""
     employees: Optional[int] = None
+    hourly_wage: Optional[int] = None  # 時給（円）
     note: str
     business_count: int = 0
 
@@ -127,6 +130,7 @@ class BusinessOut(_Out):
     exec_view: str
     field_view: str
     updated_at: datetime
+    monthly_count: Optional[int] = None  # 月の件数（空なら、画面が頻度の文字から換算する）
     status: str = "未着手"
     adopted_plan: str = ""  # 採用する案（ume / take / matsu。未選択は空）
     # 削減時間（1回あたり・分）＝ AS-ISの合計時間 − TO-BEの合計時間。案ごと（作成済みの案だけ入る）
@@ -156,6 +160,7 @@ class CompanyIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     industry: str = Field("", max_length=100)  # 業種
     employees: Optional[int] = Field(None, ge=0, le=10_000_000)  # 従業員数（人）
+    hourly_wage: Optional[int] = Field(None, ge=0, le=1_000_000)  # 時給（円）
     note: str = ""
 
 
@@ -178,6 +183,7 @@ class BusinessIn(BaseModel):
     department: str = ""
     frequency: str = ""
     description: str = ""
+    monthly_count: Optional[int] = Field(None, ge=0, le=100_000_000)  # 月の件数（空なら頻度から換算）
 
 
 class BusinessNotesIn(BaseModel):
@@ -221,6 +227,7 @@ class TobeChange(BaseModel):
 class TobePlanOut(BaseModel):
     summary: str = ""             # この案の要約
     needs: list[str] = []         # 導入・準備が必要なもの
+    cost_items: list[str] = []    # お金のかかる導入物（単価表の名前。ないものは要見積もり）
     changes: list[TobeChange]
 
 
@@ -230,6 +237,24 @@ class TobeSuggestOut(BaseModel):
 
 class AdoptIn(BaseModel):
     plan: Optional[Plan] = None   # 採用する案。None で未選択に戻す
+
+
+# ---------- 単価表 ----------
+class CostItemOut(_Out):
+    id: int
+    name: str
+    initial_cost: int
+    monthly_cost: int
+    note: str
+    sort: int
+
+
+class CostItemIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=60)
+    initial_cost: int = Field(0, ge=0, le=1_000_000_000)   # 初期費用（円）
+    monthly_cost: int = Field(0, ge=0, le=1_000_000_000)   # 月額（円）
+    note: str = Field("", max_length=200)
+    sort: int = 0
 
 
 class AssignIn(BaseModel):

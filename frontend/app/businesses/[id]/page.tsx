@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMe } from "@/components/AppShell";
@@ -7,12 +8,13 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ComparisonView } from "@/components/ComparisonView";
 import { FlowBoard } from "@/components/FlowBoard";
 import { ApiError, api } from "@/lib/api";
+import { WORKDAYS_PER_MONTH, formatPayback, formatYen, monthlyCountOf, planCost, planEffect } from "@/lib/cost";
 import { normalize } from "@/lib/flow";
 import { parseHearing } from "@/lib/hearing";
 import { applyTobeChanges } from "@/lib/tobe";
 import {
   FLOW_KINDS, PLANS, PLAN_DESC, PLAN_LABEL, emptyFlow, planKind,
-  type Business, type Company, type Flow, type FlowDoc, type FlowKind, type Plan, type Resource, type TobeKind,
+  type Business, type Company, type CostItem, type Flow, type FlowDoc, type FlowKind, type Plan, type Resource, type TobeKind,
 } from "@/lib/types";
 
 type Tab = "notes" | "asis" | "tobe" | "compare";
@@ -51,6 +53,8 @@ export default function BusinessPage() {
   const [business, setBusiness] = useState<Business | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
   const [resources, setResources] = useState<Resource[]>([]);
+  // 単価表（全企業共通）。TO-BEの案の費用（概算）に使う
+  const [costItems, setCostItems] = useState<CostItem[]>([]);
   const [drafts, setDrafts] = useState<Record<FlowKind, Draft | null>>(() => forEachKind(() => null));
   // TO-BEタブ・比較タブで見ている案（梅・竹・松）
   const [plan, setPlan] = useState<Plan>("take");
@@ -102,10 +106,12 @@ export default function BusinessPage() {
         setPlan(b.adopted_plan && plans[b.adopted_plan] ? b.adopted_plan : made[0] ?? "take");
       }
       api.config().then((x) => setAiEnabled(!!x.ai_enabled), () => setAiEnabled(false));
+      // 単価表と費用対効果は、銀行担当者だけが扱う（企業の方には見せない）
+      if (isAdmin) api.costItems().then(setCostItems, () => setCostItems([]));
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
     }
-  }, [bid]);
+  }, [bid, isAdmin]);
 
   useEffect(() => {
     if (me) load();
@@ -282,7 +288,7 @@ export default function BusinessPage() {
       for (const p of PLANS) {
         const sp = s.plans[p];
         if (!sp) continue;
-        const r = applyTobeChanges(asis.doc.data, sp.changes, resources, { summary: sp.summary, needs: sp.needs });
+        const r = applyTobeChanges(asis.doc.data, sp.changes, resources, { summary: sp.summary, needs: sp.needs, cost_items: sp.cost_items });
         if (r.applied > 0) made.push({ plan: p, kind: planKind(p), flow: r.flow });
       }
       if (made.length === 0) throw new Error("AIの改善案をAS-ISに当てはめられませんでした。もう一度お試しください");
@@ -509,8 +515,16 @@ export default function BusinessPage() {
                 {PLAN_LABEL[plan]}の案{d.data.summary ? `：${d.data.summary}` : `（${PLAN_DESC[plan]}）`}
               </strong>
               {!!d.data.needs?.length && <span>導入・準備が必要なもの：{d.data.needs.join("、")}</span>}
+              {isAdmin && (
+                <CostItemsEditor
+                  names={d.data.cost_items ?? []}
+                  table={costItems}
+                  onChange={(names) => edit(kind, { ...d.data, cost_items: names })}
+                />
+              )}
               <span className="muted small">
-                作業をクリックすると手直しできます。時間はAIの目安なので、確認してから保存してください。費用は含みません。
+                作業をクリックすると手直しできます。時間はAIの目安なので、確認してから保存してください。
+                {isAdmin && "費用対効果は「比較」タブに出ます。"}
               </span>
             </div>
             <button
@@ -674,6 +688,11 @@ export default function BusinessPage() {
                 plans={PLANS.map((p) => ({ plan: p, flow: drafts[planKind(p)]?.data ?? null, saved: !!drafts[planKind(p)]?.doc }))}
                 adopted={business.adopted_plan}
                 onAdopt={adopt}
+                costItems={costItems}
+                hourlyWage={company.hourly_wage}
+                business={business}
+                companyId={company.id}
+                isAdmin={isAdmin}
               />
               {planPicker}
               {drafts[tobeKind] ? (
@@ -699,71 +718,207 @@ export default function BusinessPage() {
   );
 }
 
-/** 梅・竹・松の3案を横に並べて見比べる表（比較タブの一番上） */
+/** 案の「お金のかかる導入物」を、単価表から選んで足す・外す（費用の計算に使う） */
+function CostItemsEditor({
+  names, table, onChange,
+}: { names: string[]; table: CostItem[]; onChange: (names: string[]) => void }) {
+  const [other, setOther] = useState("");
+  const known = new Set(table.map((c) => c.name));
+  const rest = table.filter((c) => !names.includes(c.name));
+  const add = (name: string) => {
+    const n = name.trim();
+    if (n && !names.includes(n)) onChange([...names, n]);
+  };
+  return (
+    <div className="cost-edit">
+      <span className="cost-edit-label">お金のかかる導入物：</span>
+      {names.length === 0 && <span className="muted">なし（費用0円）</span>}
+      {names.map((n) => (
+        <span key={n} className={known.has(n) ? "chip" : "chip unknown"} title={known.has(n) ? undefined : "単価表にないので、費用は「要見積もり」になります"}>
+          {n}
+          {!known.has(n) && <em>要見積もり</em>}
+          <button type="button" aria-label={`${n}を外す`} onClick={() => onChange(names.filter((x) => x !== n))}>
+            ×
+          </button>
+        </span>
+      ))}
+      {rest.length > 0 && (
+        <select
+          value=""
+          aria-label="単価表から足す"
+          onChange={(e) => {
+            add(e.target.value);
+            e.target.value = "";
+          }}
+        >
+          <option value="">＋ 単価表から足す</option>
+          {rest.map((c) => (
+            <option key={c.id} value={c.name}>
+              {c.name}（初期 {formatYen(c.initial_cost)}・月額 {formatYen(c.monthly_cost)}）
+            </option>
+          ))}
+        </select>
+      )}
+      <input
+        className="cost-other"
+        placeholder="単価表にないもの"
+        value={other}
+        aria-label="単価表にないものを足す"
+        onChange={(e) => setOther(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          add(other);
+          setOther("");
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * 梅・竹・松の3案を横に並べて見比べる表（比較タブの一番上）。
+ * 削減時間は全員に、単価表による費用対効果（概算）は銀行担当者（isAdmin）にだけ出す。
+ */
 function PlanSummary({
-  asisMinutes, plans, adopted, onAdopt,
+  asisMinutes, plans, adopted, onAdopt, costItems, hourlyWage, business, companyId, isAdmin,
 }: {
   asisMinutes: number;
   plans: { plan: Plan; flow: Flow | null; saved: boolean }[];
   adopted: Plan | "";
   onAdopt: (p: Plan) => void;
+  costItems: CostItem[];
+  hourlyWage: number | null;
+  business: Business;
+  companyId: number;
+  isAdmin: boolean;
 }) {
+  const { count, from } = monthlyCountOf(business);
+  const dash = <span className="muted">—</span>;
   return (
-    <div className="table-wrap">
-      <table className="plain plan-summary">
-        <thead>
-          <tr>
-            <th>案</th>
-            <th>内容</th>
-            <th>導入・準備が必要なもの</th>
-            <th className="num">1回あたりの時間</th>
-            <th className="num">削減時間（1回あたり）</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {plans.map(({ plan, flow, saved }) => {
-            const minutes = flow ? flow.steps.reduce((n, st) => n + (st.minutes || 0), 0) : null;
-            const cut = minutes === null ? null : asisMinutes - minutes;
-            return (
-              <tr key={plan} className={adopted === plan ? "adopted" : ""}>
-                <td>
-                  <strong className={`plan-badge ${plan}`}>{PLAN_LABEL[plan]}</strong>
-                </td>
-                <td>
-                  {flow ? flow.summary || PLAN_DESC[plan] : <span className="muted">未作成（{PLAN_DESC[plan]}）</span>}
-                </td>
-                <td className="small">{flow?.needs?.length ? flow.needs.join("、") : <span className="muted">—</span>}</td>
-                <td className="num">
-                  {minutes === null ? <span className="muted">—</span> : `${fmtMin(asisMinutes)} → ${fmtMin(minutes)}`}
-                </td>
-                <td className="num">
-                  {cut === null ? (
-                    <span className="muted">—</span>
-                  ) : (
-                    <span className={cut < 0 ? "saved minus" : "saved"}>
-                      {cut < 0 ? "−" : ""}
-                      {fmtMin(Math.abs(cut))}
-                    </span>
+    <div className="stack">
+      <div className="table-wrap">
+        <table className="plain plan-summary">
+          <thead>
+            <tr>
+              <th>案</th>
+              <th>内容</th>
+              {isAdmin && <th>お金のかかる導入物</th>}
+              <th className="num">削減時間（1回）</th>
+              {isAdmin && (
+                <>
+                  <th className="num">初期費用</th>
+                  <th className="num">月額費用</th>
+                  <th className="num">月の削減額</th>
+                  <th className="num">月の効果</th>
+                  <th className="num">回収期間</th>
+                </>
+              )}
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {plans.map(({ plan, flow, saved }) => {
+              const minutes = flow ? flow.steps.reduce((n, st) => n + (st.minutes || 0), 0) : null;
+              const cut = minutes === null ? null : asisMinutes - minutes;
+              const cost = planCost(flow?.cost_items, costItems);
+              const eff = planEffect(cut, count, hourlyWage, cost);
+              const estimate = cost.unknown.length > 0;
+              return (
+                <tr key={plan} className={adopted === plan ? "adopted" : ""}>
+                  <td>
+                    <strong className={`plan-badge ${plan}`}>{PLAN_LABEL[plan]}</strong>
+                  </td>
+                  <td>
+                    {flow ? flow.summary || PLAN_DESC[plan] : <span className="muted">未作成（{PLAN_DESC[plan]}）</span>}
+                    {!!flow?.needs?.length && <div className="small muted">準備：{flow.needs.join("、")}</div>}
+                  </td>
+                  {isAdmin && (
+                    <td className="small">
+                      {!flow ? dash : cost.priced.length + cost.unknown.length === 0 ? (
+                        <span className="muted">なし</span>
+                      ) : (
+                        <>
+                          {cost.priced.map((c) => c.name).join("、")}
+                          {estimate && (
+                            <div className="estimate" title="単価表にないので、費用の合計には入っていません">
+                              要見積もり：{cost.unknown.join("、")}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </td>
                   )}
-                </td>
-                <td>
-                  {flow && (
-                    <button
-                      className={adopted === plan ? "btn primary" : "btn ghost"}
-                      disabled={!saved}
-                      title={saved ? "業務一覧の削減時間に、この案を使います" : "保存すると採用できます"}
-                      onClick={() => onAdopt(plan)}
-                    >
-                      {adopted === plan ? "✓ 採用中" : "採用"}
-                    </button>
+                  <td className="num">
+                    {cut === null ? dash : (
+                      <span className={cut < 0 ? "saved minus" : "saved"}>
+                        {cut < 0 ? "−" : ""}
+                        {fmtMin(Math.abs(cut))}
+                      </span>
+                    )}
+                  </td>
+                  {isAdmin && (
+                    <>
+                      <td className="num">{!flow ? dash : `${formatYen(cost.initial)}${estimate ? "＋要見積もり" : ""}`}</td>
+                      <td className="num">{!flow ? dash : `${formatYen(cost.monthly)}${estimate ? "＋要見積もり" : ""}`}</td>
+                      <td className="num">{eff.monthlySaving === null ? dash : formatYen(eff.monthlySaving)}</td>
+                      <td className="num">
+                        {eff.monthlyNet === null ? (
+                          estimate && eff.monthlySaving !== null ? <span className="estimate">要見積もり</span> : dash
+                        ) : (
+                          <span className={eff.monthlyNet < 0 ? "saved minus" : "saved"}>{formatYen(eff.monthlyNet)}</span>
+                        )}
+                      </td>
+                      <td className="num">
+                        {eff.paybackMonths === null ? (
+                          estimate && eff.monthlySaving !== null ? <span className="estimate">要見積もり</span> : dash
+                        ) : (
+                          formatPayback(eff.paybackMonths)
+                        )}
+                      </td>
+                    </>
                   )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                  <td>
+                    {flow && (
+                      <button
+                        className={adopted === plan ? "btn primary" : "btn ghost"}
+                        disabled={!saved}
+                        title={saved ? "業務一覧の削減時間に、この案を使います" : "保存すると採用できます"}
+                        onClick={() => onAdopt(plan)}
+                      >
+                        {adopted === plan ? "✓ 採用中" : "採用"}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {isAdmin && (
+        <p className="muted small cost-basis">
+          <strong>費用対効果は概算です。</strong>
+          月の削減額＝削減時間 × 月の件数 × 時給、月の効果＝月の削減額 − 月額費用、回収期間＝初期費用 ÷ 月の効果。 前提：月の件数{" "}
+          {count === null ? (
+            <b className="error-text">未設定（「業務情報を編集」で入力してください）</b>
+          ) : (
+            <b>
+              {count.toLocaleString("ja-JP")}件
+              {from === "frequency" && `（頻度「${business.frequency}」から換算。1か月${WORKDAYS_PER_MONTH}営業日）`}
+            </b>
+          )}
+          、時給{" "}
+          {hourlyWage == null ? (
+            <b className="error-text">
+              未設定（<Link href={`/companies/${companyId}`}>企業ページ</Link>で設定します）
+            </b>
+          ) : (
+            <b>{hourlyWage.toLocaleString("ja-JP")}円</b>
+          )}
+          、費用は<Link href="/settings/costs">単価表</Link>の金額の合計（単価表にないものは「要見積もり」で、合計に入りません）。
+        </p>
+      )}
     </div>
   );
 }
@@ -787,6 +942,21 @@ function BusinessInfoEditor({ business, onSaved }: { business: Business; onSaved
         <label>
           頻度
           <input value={f.frequency} onChange={(e) => setF({ ...f, frequency: e.target.value })} />
+        </label>
+        <label>
+          月の件数（費用対効果の計算用）
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            step={1}
+            placeholder="空なら、頻度から換算します"
+            value={f.monthly_count ?? ""}
+            onChange={(e) => {
+              const v = e.target.value.trim();
+              setF({ ...f, monthly_count: /^\d+$/.test(v) ? Number(v) : null });
+            }}
+          />
         </label>
         <label>
           何の業務か

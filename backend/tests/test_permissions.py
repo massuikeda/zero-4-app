@@ -197,3 +197,85 @@ def test_adopt_plan():
         r = c.put(f"/api/businesses/{bid}/adopted", json={"plan": None}, headers=ADMIN).json()
         assert r["adopted_plan"] == "" and r["saved_minutes"] is None
         c.delete(f"/api/businesses/{bid}", headers=ADMIN)
+
+
+def test_cost_items():
+    with TestClient(app) as c:
+        # 最初から目安の単価表が入っている。見られるのは銀行担当者だけ（企業担当者には見せない）
+        assert c.get("/api/cost-items", headers=TANAKA).status_code == 403
+        items = c.get("/api/cost-items", headers=ADMIN).json()
+        rpa = next(x for x in items if x["name"] == "RPA")
+        assert rpa["monthly_cost"] == 150000 and len(items) >= 5
+        assert c.get("/api/cost-items").status_code == 401
+        # 編集は銀行担当者だけ
+        new = {"name": "AI-OCR", "initial_cost": 100000, "monthly_cost": 50000, "note": "手書きに強い"}
+        assert c.post("/api/cost-items", json=new, headers=TANAKA).status_code == 403
+        assert c.put(f"/api/cost-items/{rpa['id']}", json={**rpa, "monthly_cost": 1}, headers=TANAKA).status_code == 403
+        assert c.delete(f"/api/cost-items/{rpa['id']}", headers=TANAKA).status_code == 403
+        r = c.post("/api/cost-items", json=new, headers=ADMIN)
+        assert r.status_code == 200 and r.json()["monthly_cost"] == 50000
+        iid = r.json()["id"]
+        # 同じ名前は登録できない。マイナス・数値でない金額・空の名前も受け付けない
+        assert c.post("/api/cost-items", json=new, headers=ADMIN).status_code == 409
+        assert c.put(f"/api/cost-items/{iid}", json={**new, "name": "RPA"}, headers=ADMIN).status_code == 409
+        for bad in ({**new, "name": "x", "monthly_cost": -1}, {**new, "name": "x", "initial_cost": "たくさん"}, {**new, "name": "  "}, {**new, "name": ""}):
+            assert c.post("/api/cost-items", json=bad, headers=ADMIN).status_code == 422
+        r = c.put(f"/api/cost-items/{iid}", json={**new, "monthly_cost": 60000}, headers=ADMIN)  # 同じ名前のまま金額だけ変える
+        assert r.status_code == 200 and r.json()["monthly_cost"] == 60000
+        assert c.delete(f"/api/cost-items/{iid}", headers=ADMIN).status_code == 200
+        assert c.delete(f"/api/cost-items/{iid}", headers=ADMIN).status_code == 404
+        assert all(x["name"] != "AI-OCR" for x in c.get("/api/cost-items", headers=ADMIN).json())
+
+
+def test_wage_monthly_count_and_plan_cost_items():
+    with TestClient(app) as c:
+        # 時給は企業ごと（銀行担当者が設定）
+        co = c.get("/api/companies/1", headers=ADMIN).json()
+        assert co["hourly_wage"] is None
+        body = {"name": co["name"], "industry": co["industry"], "employees": co["employees"], "note": co["note"], "hourly_wage": 2500}
+        assert c.put("/api/companies/1", json=body, headers=TANAKA).status_code == 403
+        assert c.put("/api/companies/1", json={**body, "hourly_wage": -1}, headers=ADMIN).status_code == 422
+        r = c.put("/api/companies/1", json=body, headers=ADMIN).json()
+        assert r["hourly_wage"] == 2500 and r["industry"] == co["industry"] and r["employees"] == co["employees"]
+        assert c.get("/api/companies/1", headers=TANAKA).json()["hourly_wage"] == 2500  # 企業担当者にも見える
+        # 月の件数は業務ごと
+        bid = _ids(c)["受注〜出荷業務"]
+        b = c.get(f"/api/businesses/{bid}", headers=ADMIN).json()
+        assert b["monthly_count"] is None
+        info = {"name": b["name"], "department": b["department"], "frequency": b["frequency"], "description": b["description"]}
+        assert c.put(f"/api/businesses/{bid}", json={**info, "monthly_count": -5}, headers=ADMIN).status_code == 422
+        assert c.put(f"/api/businesses/{bid}", json={**info, "monthly_count": 600}, headers=ADMIN).json()["monthly_count"] == 600
+        assert c.put(f"/api/businesses/{bid}", json=info, headers=ADMIN).json()["monthly_count"] is None  # 空に戻せる
+        # 案に「お金のかかる導入物」を持たせられる（単価表にない名前も入る＝画面で要見積もり）
+        doc = c.get(f"/api/businesses/{bid}/flows", headers=ADMIN).json()["plans"]["take"]
+        doc["data"]["cost_items"] = ["RPA", "独自開発の基幹システム"]
+        r = c.put(f"/api/businesses/{bid}/flows/tobe_take", json={"data": doc["data"], "version": doc["version"]}, headers=TANAKA)
+        assert r.status_code == 200 and r.json()["data"]["cost_items"] == ["RPA", "独自開発の基幹システム"]
+
+
+def test_candidates_come_from_flows():
+    """図の候補（担当・道具）は手で登録せず、その企業の図に出てきたものをそのまま使う"""
+    with TestClient(app) as c:
+        co = c.post("/api/companies", headers=ADMIN, json={"name": "候補テスト工業"}).json()["id"]
+        assert c.get(f"/api/companies/{co}/resources", headers=ADMIN).json() == []  # 図がなければ候補もない
+        bid = c.post(f"/api/companies/{co}/businesses", headers=ADMIN, json={"name": "発注"}).json()["id"]
+        steps = [
+            {"id": "S01", "lane": "購買部", "name": "発注書を作る", "tool": "生産管理システム", "next": ["S02"]},
+            {"id": "S02", "lane": "仕入先", "name": "納品する", "tool": "紙の納品書", "next": ["S03"]},
+            {"id": "S03", "lane": "購買部", "name": "検収する", "tool": "生産管理システム", "next": []},
+        ]
+        asis = {"lanes": ["購買部", "仕入先", "経理部"], "steps": steps}
+        assert c.put(f"/api/businesses/{bid}/flows/asis", json={"data": asis, "version": 0}, headers=ADMIN).status_code == 200
+        got = {(r["kind"], r["name"]) for r in c.get(f"/api/companies/{co}/resources", headers=ADMIN).json()}
+        # 担当は部署か取引先に、道具はシステムか帳票に分ける。同じ名前は1つにまとめる。作業のない列（経理部）も候補に入る
+        assert got == {("部署", "購買部"), ("取引先", "仕入先"), ("部署", "経理部"), ("システム", "生産管理システム"), ("帳票", "紙の納品書")}
+        # TO-BEの案に出てきた道具（RPAなど）も候補になる
+        plan = {"lanes": ["購買部"], "steps": [{"id": "S01", "lane": "購買部", "name": "自動で発注する", "tool": "RPA", "next": []}]}
+        assert c.put(f"/api/businesses/{bid}/flows/tobe_matsu", json={"data": plan, "version": 0}, headers=ADMIN).status_code == 200
+        names = [r["name"] for r in c.get(f"/api/companies/{co}/resources", headers=ADMIN).json()]
+        assert "RPA" in names and len(names) == len(set(names))
+        # ほかの企業の図は混ざらない。ほかの企業の人には見えない
+        other = {r["name"] for r in c.get("/api/companies/1/resources", headers=ADMIN).json()}
+        assert "生産管理システム" not in other and "営業部（受注）" in other
+        assert c.get(f"/api/companies/{co}/resources", headers=TANAKA).status_code == 404
+        c.delete(f"/api/companies/{co}", headers=ADMIN)

@@ -39,6 +39,7 @@ class Company(Base):
     name: Mapped[str] = mapped_column(String(200))
     industry: Mapped[str] = mapped_column(String(100), default="")  # 業種
     employees: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 従業員数（未入力は空）
+    hourly_wage: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 時給（円）。削減時間を金額に直すのに使う
     note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
@@ -88,11 +89,41 @@ class Business(Base):
     exec_view: Mapped[str] = mapped_column(Text, default="")   # 経営者の認識
     field_view: Mapped[str] = mapped_column(Text, default="")  # 現場の実態
     adopted_plan: Mapped[str] = mapped_column(String(10), default="")  # 採用するTO-BEの案（ume / take / matsu。未選択は空）
+    # 月の件数（費用対効果の計算に使う）。空なら、頻度の文字（「日30件」など）から画面側で換算する
+    monthly_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
     company: Mapped[Company] = relationship(back_populates="businesses")
     flows: Mapped[list["FlowDoc"]] = relationship(back_populates="business", cascade="all, delete-orphan")
     assignees: Mapped[list[User]] = relationship(secondary=assignments, back_populates="businesses")
+
+
+class CostItem(Base):
+    """単価表（全企業共通）。TO-BEの案で導入するもの（RPA・OCR など）の、初期費用と月額の目安。銀行担当者が編集する"""
+
+    __tablename__ = "cost_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(60), unique=True)
+    initial_cost: Mapped[int] = mapped_column(Integer, default=0)  # 初期費用（円）
+    monthly_cost: Mapped[int] = mapped_column(Integer, default=0)  # 月額（円）
+    note: Mapped[str] = mapped_column(String(200), default="")
+    sort: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# 単価表の最初の中身（表が空のときだけ入れる）。金額は仮の目安なので、銀行担当者が画面で直して使う
+DEFAULT_COST_ITEMS: list[tuple[str, int, int, str]] = [
+    # 名前, 初期費用, 月額, メモ
+    ("RPA", 0, 150_000, "画面操作・転記の自動実行"),
+    ("OCR", 0, 30_000, "紙・FAXの読み取り"),
+    ("Webフォーム", 0, 5_000, "注文・申請の入力フォーム"),
+    ("ワークフロー", 0, 20_000, "電子承認・スマホ承認"),
+    ("ビジネスチャット", 0, 10_000, "社内の連絡"),
+    ("クラウド型の業務サービス", 0, 30_000, "経費精算・請求書発行・受発注など"),
+    ("電子帳票", 0, 10_000, "紙の伝票・帳票の電子化"),
+    ("システム連携の設定", 500_000, 0, "API・CSVの自動取り込み"),
+    ("EDI", 300_000, 30_000, "取引先との受発注データの交換"),
+    ("バーコード", 200_000, 0, "読み取り機器と設定"),
+]
 
 
 class FlowDoc(Base):
@@ -158,6 +189,8 @@ _ADDED_COLUMNS = [
     ("companies", "industry", "VARCHAR(100) NOT NULL DEFAULT ''"),
     ("companies", "employees", "INTEGER"),
     ("businesses", "adopted_plan", "VARCHAR(10) NOT NULL DEFAULT ''"),
+    ("companies", "hourly_wage", "INTEGER"),
+    ("businesses", "monthly_count", "INTEGER"),
 ]
 
 
@@ -173,6 +206,20 @@ def init_db():
                     ddl = ddl.replace("DEFAULT ''", "DEFAULT ('')")  # MySQL は TEXT の初期値をかっこで書く
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
         _move_company_note(conn)
+        _fill_cost_items(conn)
+
+
+def _fill_cost_items(conn) -> None:
+    """単価表が空なら、最初の中身を入れる（1件でもあれば何もしない。消したものを勝手に戻さない）"""
+    from sqlalchemy import func, insert, select
+
+    table = CostItem.__table__
+    if conn.scalar(select(func.count()).select_from(table)):
+        return
+    conn.execute(insert(table), [
+        {"name": n, "initial_cost": i, "monthly_cost": m, "note": note, "sort": k}
+        for k, (n, i, m, note) in enumerate(DEFAULT_COST_ITEMS)
+    ])
 
 
 def _move_company_note(conn) -> None:

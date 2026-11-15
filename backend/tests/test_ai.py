@@ -97,13 +97,13 @@ def test_tobe_suggest(monkeypatch):
         every = ", ".join('{"id": "%s", "action": "排除", "note": "x"}' % s["id"] for s in asis["steps"])
         answer = """```json
 {"plans": {
-  "ume": {"summary": "様式をそろえる", "needs": ["入力様式の統一ルール"], "changes": [
+  "ume": {"summary": "様式をそろえる", "needs": ["入力様式の統一ルール"], "cost_items": [], "changes": [
     {"id": "%(s0)s", "action": "簡素化", "name": "定型文で依頼する", "minutes": 99999, "tool": "共有Excel", "media": "チャット", "note": "電話をやめ、メールの定型文で依頼する"},
     {"id": "S999", "action": "簡素化", "note": "AS-ISにない作業"},
     {"id": "%(s0)s", "action": "排除", "note": "同じ作業への2つ目の変更"},
     {"id": "%(s2)s", "action": "魔法", "note": "決まっていない変更区分"}
   ]},
-  "take": {"summary": "OCRで読み取る", "needs": ["OCRサービス", "", 5], "changes": [
+  "take": {"summary": "OCRで読み取る", "needs": ["OCRサービス", "", 5], "cost_items": ["OCR", "OCR", " 独自の読み取り装置 ", "", 7, {"x": 1}], "changes": [
     {"id": "%(s0)s", "action": "自動化", "name": "読み取り結果を確認する", "minutes": 1, "tool": "OCR", "media": "のろし", "note": "OCRで読み取る", "issue_resolved": true},
     {"id": "%(s1)s", "action": "排除", "name": "無視される名前", "note": "不要になる"}
   ]},
@@ -124,6 +124,8 @@ def test_tobe_suggest(monkeypatch):
         assert ume["changes"][0]["tool"] == "共有Excel" and ume["changes"][0]["media"] == "チャット"
         assert ume["changes"][0]["minutes"] <= s0["minutes"] or s0["minutes"] == 0  # 変更前より増やさない
         assert take["needs"] == ["OCRサービス", "5"]
+        # お金のかかる導入物：重複・空・文字でないものは捨てる。単価表にない名前はそのまま残す（画面で要見積もり）
+        assert ume["cost_items"] == [] and take["cost_items"] == ["OCR", "独自の読み取り装置"]
         assert [(x["id"], x["action"]) for x in take["changes"]] == [(s0["id"], "自動化"), (s1["id"], "排除")]
         assert take["changes"][0]["issue_resolved"] is True and take["changes"][0]["media"] is None  # 決まっていない渡し方は使わない
         assert take["changes"][1]["name"] is None  # 排除では作業名を使わない
@@ -132,6 +134,7 @@ def test_tobe_suggest(monkeypatch):
         assert "梅" in msgs[0]["content"] and "RPA" in msgs[0]["content"]
         last = msgs[-1]["content"]
         assert s0["id"] in last and s0["name"] in last and "道具の候補" in last and "<flow>" in last
+        assert "単価表の候補：RPA、OCR" in last  # 単価表の名前が、候補として渡る
         # 保存はしない
         assert c.get(f"/api/businesses/{bid}/flows", headers=ADMIN).json()["plans"] == {}
         # 他社の業務は 404
@@ -178,3 +181,8 @@ def test_example_plans_are_valid():
         saved[key] = sum(by_id[ch["id"]] - (0 if ch["action"] == "排除" else ch.get("minutes", by_id[ch["id"]])) for ch in p["changes"])
     assert 0 < saved["ume"] < saved["take"] < saved["matsu"]
     assert all(ch["action"] != "自動化" for ch in plans["ume"]["changes"])  # 梅ではツールを入れない
+    # お金のかかる導入物：梅は空。竹・松は、見本の「単価表の候補」にある名前だけを使っている
+    candidates = ai.TOBE_EXAMPLE_INPUT.split("単価表の候補：")[1].splitlines()[0].split("、")
+    assert plans["ume"]["cost_items"] == []
+    assert plans["take"]["cost_items"] and plans["matsu"]["cost_items"]
+    assert all(x in candidates for key in ("take", "matsu") for x in plans[key]["cost_items"])

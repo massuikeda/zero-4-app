@@ -65,6 +65,8 @@ export interface Flow {
   summary?: string;
   /** TO-BEの案で、導入・準備が必要なもの */
   needs?: string[];
+  /** TO-BEの案で、お金のかかる導入物（単価表の名前。単価表にない名前は「要見積もり」になる） */
+  cost_items?: string[];
   /** TO-BEの案で、なくした作業（排除）の理由。作業ID → 理由 */
   removed_notes?: Record<string, string>;
 }
@@ -114,6 +116,8 @@ export interface Company {
   industry: string;
   /** 従業員数（人）。未入力は null */
   employees: number | null;
+  /** 時給（円）。削減時間を金額に直すのに使う。未設定は null */
+  hourly_wage: number | null;
   note: string;
   business_count: number;
 }
@@ -141,6 +145,8 @@ export interface Business {
   exec_view: string;
   field_view: string;
   updated_at: string;
+  /** 月の件数（費用対効果の計算に使う）。空なら頻度の文字から換算する */
+  monthly_count: number | null;
   status: "未着手" | "AS-IS作成済" | "TO-BE作成済";
   /** 採用する案（未選択は空） */
   adopted_plan: Plan | "";
@@ -169,10 +175,24 @@ export interface TobeChange {
 export interface TobePlan {
   summary: string;
   needs: string[];
+  /** お金のかかる導入物（単価表の名前。ないものは要見積もり） */
+  cost_items: string[];
   changes: TobeChange[];
 }
 
 /** AIが出したTO-BEの改善案（出せた案だけ入る） */
 export interface TobeSuggestion {
   plans: Partial<Record<Plan, TobePlan>>;
+}
+
+/** 単価表（全企業共通）の1件。TO-BEの案で導入するものの、初期費用と月額の目安 */
+export interface CostItem {
+  id: number;
+  name: string;
+  /** 初期費用（円） */
+  initial_cost: number;
+  /** 月額（円） */
+  monthly_cost: number;
+  note: string;
+  sort: number;
 }

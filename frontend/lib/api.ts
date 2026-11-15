@@ -2,7 +2,7 @@
 
 import { authHeaders } from "./auth";
 import type {
-  Business, Company, Comparison, Flow, FlowDoc, FlowKind, Me, Plan, Resource, ResourceKind, TobeKind, TobeSuggestion,
+  Business, Company, Comparison, CostItem, Flow, FlowDoc, FlowKind, Me, Plan, Resource, ResourceKind, TobeKind, TobeSuggestion,
   UserRow,
 } from "./types";
 
@@ -37,8 +37,9 @@ async function call<T>(path: string, init?: { method?: string; body?: unknown; t
   return (init?.text ? res.text() : res.json()) as Promise<T>;
 }
 
-type CompanyIn = { name: string; industry: string; employees: number | null; note?: string };
-type BusinessIn = Pick<Business, "name" | "department" | "frequency" | "description">;
+type CompanyIn = { name: string; industry: string; employees: number | null; note?: string; hourly_wage?: number | null };
+type CostItemIn = Pick<CostItem, "name" | "initial_cost" | "monthly_cost" | "note" | "sort">;
+type BusinessIn = Pick<Business, "name" | "department" | "frequency" | "description"> & { monthly_count?: number | null };
 type NotesIn = Partial<Pick<Business, "hearing_raw" | "hearing_notes" | "exec_view" | "field_view">>;
 
 export const api = {
@@ -91,6 +92,12 @@ export const api = {
     call<Business>(`/api/businesses/${bid}/adopted`, { method: "PUT", body: { plan } }),
   drawio: (bid: number, kind: FlowKind) => call<string>(`/api/businesses/${bid}/flows/${kind}/drawio`, { text: true }),
   renderDrawio: (flow: Flow, title: string) => call<string>("/api/render/drawio", { body: { flow, title }, text: true }),
+
+  /** 単価表（全企業共通）。見るのは誰でも、編集は銀行担当者 */
+  costItems: () => call<CostItem[]>("/api/cost-items"),
+  createCostItem: (b: CostItemIn) => call<CostItem>("/api/cost-items", { body: b }),
+  updateCostItem: (id: number, b: CostItemIn) => call<CostItem>(`/api/cost-items/${id}`, { method: "PUT", body: b }),
+  deleteCostItem: (id: number) => call(`/api/cost-items/${id}`, { method: "DELETE" }),
 
   users: (cid: number) => call<UserRow[]>(`/api/companies/${cid}/users`),
   createUser: (b: { email: string; name: string; role: "member"; company_id: number }) =>

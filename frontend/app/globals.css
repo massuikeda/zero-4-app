@@ -576,3 +576,27 @@ table.plain .saved.minus { color: var(--danger); }
 .plan-badge.matsu { background: #1f5f3a; }
 table.plan-summary tr.adopted td { background: var(--accent-soft); }
 @media (max-width: 720px) { .plan-tabs { grid-template-columns: 1fr; } }
+
+/* 単価表・費用対効果 */
+.top-link { color: var(--accent); font-size: 13px; font-weight: 600; text-decoration: none; }
+.top-link:hover { text-decoration: underline; }
+.cost-table input { width: 100%; padding: 6px 8px; font-size: 14px; }
+.cost-table input.yen { text-align: right; max-width: 140px; font-variant-numeric: tabular-nums; }
+.cost-add .field { display: flex; flex-direction: column; gap: 4px; flex: 1 1 200px; min-width: 0; }
+.cost-add .field.narrow { flex: 0 1 150px; }
+.cost-add .row { align-items: flex-end; }
+.cost-add input[aria-invalid="true"], .wage-edit input[aria-invalid="true"] { border-color: var(--danger); }
+.wage-edit { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+.wage-edit label { display: flex; flex-direction: column; gap: 2px; }
+.wage-edit input { width: 120px; text-align: right; }
+.cost-edit { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+.cost-edit-label { font-weight: 700; }
+.cost-edit select, .cost-edit .cost-other { font-size: 12px; padding: 3px 6px; }
+.cost-edit .cost-other { width: 150px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; background: #fff; border: 1px solid #c5dbf2; border-radius: 99px; padding: 1px 4px 1px 10px; }
+.chip.unknown { border-color: #e0b070; background: #fff8ec; }
+.chip em { font-style: normal; font-size: 11px; color: var(--warn); }
+.chip button { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 14px; line-height: 1; }
+.chip button:hover { color: var(--danger); }
+.estimate { color: var(--warn); font-weight: 700; }
+.cost-basis a { color: var(--accent); }
