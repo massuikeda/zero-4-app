@@ -61,8 +61,12 @@ def _flow_doc_out(f: FlowDoc | None) -> FlowDocOut | None:
 
 
 @app.get("/api/health")
-def health():
-    return {"status": "ok"}
+def health(db: Session = Depends(get_db)):
+    """動いているかの確認。使っているDBの種類（sqlite / mysql）と、登録されているユーザー数も返す
+    （設定の取り違えで空のDBを見ていないかを、ここで確かめられる）"""
+    from sqlalchemy import func
+
+    return {"status": "ok", "db": db.get_bind().dialect.name, "users": db.scalar(select(func.count()).select_from(User))}
 
 
 @app.get("/api/config")
