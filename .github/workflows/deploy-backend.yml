@@ -35,7 +35,7 @@ jobs:
       - name: パッケージのインストール
         run: pip install -r requirements.txt -r requirements-dev.txt
       - name: テスト
-        run: pytest -q
+        run: python -m pytest -q
 
   deploy:
     name: デプロイ
