@@ -43,7 +43,6 @@ erDiagram
         json data "保存した時点のAS-IS（flows.data と同じ形）"
         datetime saved_at "保存した日時"
         string saved_by "保存した人"
-        float saved_hours "削減工数（月あたり・時間）を手で入力した値。空なら自動"
     }
     diagnosis_flows {
         int id PK
@@ -120,7 +119,7 @@ erDiagram
 - `businesses.exec_view`（経営者の認識）と `field_view`（現場の実態）は、画面から入力欄と表示を外したので、今は使っていません（列とデータは残してあります）
 - 月の削減額は保存していません。削減時間・企業の時給・業務の月の件数から、表示のたびに計算します（`frontend/lib/cost.ts`）
 - 以前の単価表（`cost_items` テーブル）は使っていません。アプリはもう作りません（すでにあるDBには、テーブルが残っていても害はありません）
-- 削減工数（月あたり・時間）は、AS-ISの第1版とくらべた値です。自動の値＝（第1版の作業時間 − その版の作業時間）× 月の件数（`backend/app/effort.py`）。版ごとに手で入力した値（`flow_versions.saved_hours`）があれば、そちらを使います
+- 削減工数（月あたり・時間）は保存していません。AS-ISの第1版とくらべて、表示のたびに計算します：（第1版の作業時間 − その版の作業時間）× 月の件数（`backend/app/effort.py`）
 - 削減時間は保存していません。AS-IS と TO-BE の作業時間の合計の差を、表示のたびに計算します
 
 ## flows.data の中身（JSON）

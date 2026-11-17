@@ -6,16 +6,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useMe } from "@/components/AppShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ComparisonView } from "@/components/ComparisonView";
-import { EffortChart } from "@/components/EffortChart";
 import { FlowBoard } from "@/components/FlowBoard";
 import { ApiError, api } from "@/lib/api";
-import { monthlyCountOf } from "@/lib/cost";
-import { formatHours } from "@/lib/diagnosis";
 import { counters, normalize } from "@/lib/flow";
 import { parseHearing } from "@/lib/hearing";
 import { applyTobeChanges } from "@/lib/tobe";
 import {
-  DIAGNOSIS_LABEL, FLOW_KINDS, emptyFlow,
+  FLOW_KINDS, emptyFlow,
   type AsisVersion, type Business, type Company, type Flow, type FlowDoc, type FlowKind, type Resource,
 } from "@/lib/types";
 
@@ -301,7 +298,7 @@ export default function BusinessPage() {
       const iw = w * ratio;
       const ih = h * ratio;
       pdf.addImage(url, "PNG", (pw - iw) / 2, margin, iw, ih, undefined, "FAST");
-      pdf.setProperties({ title: `${business.name} ${LABEL[kind]}`, creator: "ミエルMAP" });
+      pdf.setProperties({ title: `${business.name} ${LABEL[kind]}`, creator: "AWASERU" });
       pdf.save(`${fileBase(kind)}.pdf`);
     } catch (e) {
       flash("err", `PDFを作れませんでした：${e instanceof Error ? e.message : e}`);
@@ -470,7 +467,15 @@ export default function BusinessPage() {
             </div>
           </dl>
         </div>
-        {isAdmin && <BusinessInfoEditor business={business} onSaved={setBusiness} />}
+        {isAdmin && (
+          <BusinessInfoEditor
+            business={business}
+            onSaved={(b) => {
+              setBusiness(b);
+              flash("ok", "業務情報を保存しました");
+            }}
+          />
+        )}
       </div>
 
       {msg && <div className={msg.type === "ok" ? "toast" : "alert"}>{msg.text}</div>}
@@ -552,22 +557,7 @@ export default function BusinessPage() {
                     ))}
                   </select>
                 </label>
-                <span className="muted small">保存するたびに、版が1つ残ります（全{versions.length}版）。過去の版を選ぶと、そのときのAS-ISを見られます。</span>
               </div>
-            )}
-            {versions.length > 0 && (
-              <EffortBox
-                versions={versions}
-                monthlyCount={monthlyCountOf(business).count}
-                onSave={async (vid, value) => {
-                  try {
-                    await api.setSavedHours(vid, value);
-                    setVersions(await api.asisVersions(bid));
-                  } catch (e) {
-                    flash("err", e instanceof Error ? e.message : String(e));
-                  }
-                }}
-              />
             )}
             {viewed ? (
               <VersionView
@@ -611,102 +601,6 @@ export default function BusinessPage() {
   );
 }
 
-/**
- * 第1版からの削減工数（月あたり・時間）。AS-ISを直して保存するたびに、第1版とくらべてどれだけ減ったかが棒で伸びていく。
- * 自動の値＝（第1版の作業時間 − その版の作業時間）× 月の件数。版ごとに、手で入力した値（実績など）に置き換えられる。
- */
-function EffortBox({
-  versions, monthlyCount, onSave,
-}: { versions: AsisVersion[]; monthlyCount: number | null; onSave: (vid: number, value: number | null) => void }) {
-  const latest = versions[versions.length - 1];
-  return (
-    <details className="effort-box">
-      <summary>
-        <span className="effort-title">第1版からの削減工数（月あたり）</span>
-        <strong className={latest.saved_hours != null && latest.saved_hours < 0 ? "minus" : ""}>{formatHours(latest.saved_hours)}</strong>
-        <span className="muted small">
-          第{latest.number}版の時点{latest.saved_hours_input != null ? "・入力した値" : ""}　クリックで、版ごとのグラフと入力欄を開きます
-        </span>
-      </summary>
-      <div className="stack">
-        {monthlyCount === null && (
-          <p className="regen">
-            月の件数が分からないので、自動では出せません。「業務情報を編集」で月の件数（または「日30件」のような頻度）を入れるか、下の表に削減工数を入力してください。
-          </p>
-        )}
-        <EffortChart
-          ariaLabel="AS-ISの版ごとの削減工数（第1版との比較）"
-          points={versions.map((v) => ({
-            key: v.id,
-            label: `第${v.number}版`,
-            value: v.saved_hours,
-            title: `第${v.number}版（${fmtSavedAt(v)}）：${formatHours(v.saved_hours)}／月`,
-          }))}
-        />
-        <div className="table-wrap">
-          <table className="plain effort-table">
-            <thead>
-              <tr>
-                <th>版</th>
-                <th>保存した日時</th>
-                <th className="num">1件あたりの時間</th>
-                <th className="num">自動の値（第1版との差 × 月の件数）</th>
-                <th className="num">入力した値（時間／月）</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...versions].reverse().map((v) => (
-                <tr key={v.id}>
-                  <td className="strong">第{v.number}版</td>
-                  <td className="small muted">
-                    {fmtSavedAt(v)}
-                    {v.saved_by ? `（${v.saved_by}）` : ""}
-                  </td>
-                  <td className="num">{fmtMin(v.minutes)}</td>
-                  <td className={`num${v.saved_hours_input != null ? " muted" : ""}`}>{formatHours(v.saved_hours_auto)}</td>
-                  <td className="num">
-                    <HoursInput key={`${v.id}:${v.saved_hours_input}`} value={v.saved_hours_input} label={`第${v.number}版の削減工数`} onSave={(x) => onSave(v.id, x)} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="muted small">
-          入力した値があれば、グラフと企業ページの合計にはその値を使います（実績が分かったときなど）。空にすると、自動の値に戻ります。
-          {monthlyCount !== null && `　月の件数：${monthlyCount.toLocaleString("ja-JP")}件`}
-        </p>
-      </div>
-    </details>
-  );
-}
-
-/** 削減工数の入力欄。入力して Enter か、欄の外をクリックすると保存する */
-function HoursInput({ value, label, onSave }: { value: number | null; label: string; onSave: (v: number | null) => void }) {
-  const [text, setText] = useState(value == null ? "" : String(value));
-  const t = text.trim().replace(/[,，]/g, "").replace(/^[−ー]/, "-");
-  const parsed = t === "" ? null : Number(t);
-  const invalid = parsed !== null && !Number.isFinite(parsed);
-  const commit = () => {
-    if (!invalid && parsed !== value) onSave(parsed);
-  };
-  return (
-    <input
-      className="hours-input"
-      inputMode="decimal"
-      placeholder="自動"
-      aria-label={label}
-      aria-invalid={invalid}
-      value={text}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-      }}
-    />
-  );
-}
-
 /** 版の日時（2026/11/17 14:05） */
 function fmtSavedAt(v: AsisVersion): string {
   if (!v.saved_at) return "";
@@ -715,9 +609,9 @@ function fmtSavedAt(v: AsisVersion): string {
   return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** 版の選択肢の表示：第3版　2026/11/17 14:05（田中）★DX診断 2026/11/10 */
+/** 版の選択肢の表示：第3版　2026/11/17 14:05（田中）★診断の記録 2026/11/10 */
 function versionLabel(v: AsisVersion): string {
-  const used = v.diagnoses.map((d) => `${DIAGNOSIS_LABEL[d.kind]} ${d.date.replaceAll("-", "/")}`).join("・");
+  const used = v.diagnoses.map((d) => `診断の記録 ${d.date.replaceAll("-", "/")}`).join("・");
   return `第${v.number}版　${fmtSavedAt(v)}${v.saved_by ? `（${v.saved_by}）` : ""}${used ? `　★${used}` : ""}`;
 }
 
@@ -750,7 +644,7 @@ function VersionView({
           <span className="muted small">
             過去の版です。書き換えはできません。
             {version.diagnoses.length > 0 &&
-              `　この版を選んでいる診断の記録：${version.diagnoses.map((d) => `${d.date.replaceAll("-", "/")} ${DIAGNOSIS_LABEL[d.kind]}`).join("、")}`}
+              `　この版を選んでいる診断の記録：${version.diagnoses.map((d) => d.date.replaceAll("-", "/")).join("、")}`}
           </span>
         </div>
         <div className="row gap">
@@ -790,8 +684,10 @@ function VersionView({
 function BusinessInfoEditor({ business, onSaved }: { business: Business; onSaved: (b: Business) => void }) {
   const [f, setF] = useState(business);
   const [err, setErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const box = useRef<HTMLDetailsElement>(null);
   return (
-    <details className="info-edit">
+    <details className="info-edit" ref={box}>
       <summary className="btn ghost">業務情報を編集</summary>
       <div className="card info-form">
         {err && <div className="alert">{err}</div>}
@@ -808,7 +704,7 @@ function BusinessInfoEditor({ business, onSaved }: { business: Business; onSaved
           <input value={f.frequency} onChange={(e) => setF({ ...f, frequency: e.target.value })} />
         </label>
         <label>
-          月の件数（月の削減時間の計算用）
+          月の件数（削減時間の計算用）
           <input
             type="number"
             inputMode="numeric"
@@ -827,17 +723,27 @@ function BusinessInfoEditor({ business, onSaved }: { business: Business; onSaved
           <textarea rows={3} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
         </label>
         <button
+          type="button"
           className="btn primary"
+          disabled={saving || !f.name.trim()}
           onClick={async () => {
+            setSaving(true);
             try {
-              onSaved(await api.updateBusiness(business.id, f));
+              const saved = await api.updateBusiness(business.id, {
+                name: f.name.trim(), department: f.department, frequency: f.frequency, description: f.description,
+                monthly_count: f.monthly_count,
+              });
               setErr(null);
+              if (box.current) box.current.open = false; // 保存できたら、入力欄を閉じる
+              onSaved(saved);
             } catch (e) {
               setErr(e instanceof Error ? e.message : String(e));
+            } finally {
+              setSaving(false);
             }
           }}
         >
-          保存
+          {saving ? "保存しています…" : "保存"}
         </button>
       </div>
     </details>

@@ -1,7 +1,6 @@
 """削減工数（月あたり・時間）。AS-ISの第1版とくらべて、どれだけ作業時間が減ったか。
 
-  自動の値 ＝（第1版の作業時間の合計 − その版の作業時間の合計）× 月の件数
-  版ごとに手で入力した値（実績など）があれば、そちらを使う
+  削減工数 ＝（第1版の作業時間の合計 − その版の作業時間の合計）× 月の件数
 
 月の件数は、業務の「月の件数」。空なら頻度の文字（「日30件」など）から換算する（frontend/lib/cost.ts と同じルール）。
 """
@@ -40,7 +39,7 @@ def total_minutes(data: dict | None) -> int:
 
 
 def auto_saved_hours(first_minutes: int, minutes: int, count: int | None) -> float | None:
-    """自動の値（月あたり・時間）。月の件数が分からなければ None"""
+    """削減工数（月あたり・時間）。月の件数が分からなければ None"""
     if count is None:
         return None
     return round((first_minutes - minutes) * count / 60, 1)

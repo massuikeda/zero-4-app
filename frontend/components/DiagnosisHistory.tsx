@@ -7,7 +7,6 @@ import { api } from "@/lib/api";
 import { formatDate, formatHours } from "@/lib/diagnosis";
 import { formatMinutes } from "@/lib/flow";
 import {
-  DIAGNOSIS_KINDS, DIAGNOSIS_LABEL,
   type Business, type Diagnosis, type DiagnosisIn, type Effort, type VersionRef,
 } from "@/lib/types";
 
@@ -26,7 +25,7 @@ function savedAt(v: VersionRef): string {
 }
 
 /**
- * 診断・ヒアリングの履歴（企業ページの最初のタブ）。
+ * ヒアリング履歴（企業ページの最初のタブ）。
  * 診断を記録するときに、業務ごとに「そのときのAS-ISの版」を選ぶ。
  * 右側には、全業務の削減工数（月あたり。AS-ISの第1版とくらべて）を大きく出す。
  */
@@ -106,9 +105,6 @@ export function DiagnosisHistory({
             <header>
               <div className="diag-title">
                 <time>{formatDate(d.date)}</time>
-                <span className={`diag-badge ${d.kind}`}>
-                  {DIAGNOSIS_LABEL[d.kind]}
-                </span>
               </div>
               <span className="muted small">{d.staff || d.created_by}</span>
             </header>
@@ -167,7 +163,7 @@ export function DiagnosisHistory({
 
 /**
  * 全業務の削減工数（月あたり・時間）。経営者にひと目で伝わるように、合計を大きく出す。
- * 業務ごとに、AS-ISの第1版といちばん新しい版をくらべた値（版ごとに入力した値があれば、その値）。
+ * 業務ごとに、AS-ISの第1版といちばん新しい版をくらべた値。
  */
 function EffortPanel({ effort }: { effort: Effort | null }) {
   const rows = effort?.businesses ?? [];
@@ -177,35 +173,32 @@ function EffortPanel({ effort }: { effort: Effort | null }) {
   const total = effort?.total_hours ?? null;
   return (
     <section>
-      <h3>削減工数（全業務・月あたり）</h3>
       <div className="card effort-panel">
         {!effort ? (
           <p className="muted small">読み込み中…</p>
         ) : rows.length === 0 ? (
-          <p className="muted small">AS-ISを保存すると、最初の版（第1版）とくらべて減った作業時間が、ここに出ます。</p>
+          <p className="muted small">AS-ISを保存すると、最初の版（第1版）とくらべて削減した作業時間が、ここに出ます。</p>
         ) : (
           <>
             <div className="effort-hero">
-              <span className="effort-cap">減った作業時間</span>
+              <span className="effort-cap">削減した作業時間の合計</span>
               <span className={`effort-big${total != null && total < 0 ? " minus" : ""}`}>
                 {total == null ? "—" : formatHours(total).replace("時間", "")}
                 <small>時間／月</small>
               </span>
-              <span className="muted small">AS-ISの第1版とくらべて（{rows.length}業務の合計）</span>
             </div>
             <div className="effort-hero now">
-              <span className="effort-cap">いまの作業時間</span>
+              <span className="effort-cap">今の業務時間の合計</span>
               <span className="effort-big">
                 {effort.current_hours == null ? "—" : formatHours(effort.current_hours).replace("時間", "")}
                 <small>時間／月</small>
               </span>
-              <span className="muted small">いちばん新しいAS-ISの作業時間 × 月の件数（全業務の合計）</span>
             </div>
-            {/* 業務ごとの横棒：棒ぜんたい＝第1版のときの作業時間。青＝いまの作業時間、緑＝減った時間 */}
+            {/* 業務ごとの横棒：棒ぜんたい＝第1版のときの作業時間。青＝今の業務時間、緑＝削減した時間 */}
             <div className="effort-chart">
               <div className="effort-legend" aria-hidden>
-                <span><i className="now" />いまの作業時間</span>
-                <span><i className="saved" />減った時間</span>
+                <span><i className="now" />今の業務時間</span>
+                <span><i className="saved" />削減した時間</span>
               </div>
               <ul>
                 {rows.map((r) => {
@@ -215,7 +208,7 @@ function EffortPanel({ effort }: { effort: Effort | null }) {
                   return (
                     <li
                       key={r.business_id}
-                      title={`${r.name}：いま ${formatHours(r.current_hours)}／月、減った時間 ${formatHours(r.saved_hours)}／月（1件あたり ${formatMinutes(r.first_minutes)} → ${formatMinutes(r.latest_minutes)}・第${r.versions}版）`}
+                      title={`${r.name}：今の業務時間 ${formatHours(r.current_hours)}／月、削減した時間 ${formatHours(r.saved_hours)}／月（1件あたり ${formatMinutes(r.first_minutes)} → ${formatMinutes(r.latest_minutes)}・第${r.versions}版）`}
                     >
                       <Link className="link" href={`/businesses/${r.business_id}`}>
                         {r.name}
@@ -226,10 +219,10 @@ function EffortPanel({ effort }: { effort: Effort | null }) {
                       </span>
                       <span className="effort-nums">
                         <span>
-                          いま <b>{formatHours(r.current_hours)}</b>
+                          今の業務時間 <b>{formatHours(r.current_hours)}</b>
                         </span>
                         <span>
-                          {grew ? "増えた時間 " : "減った時間 "}
+                          {grew ? "増えた時間 " : "削減した時間 "}
                           <b className={grew ? "minus" : "saved"}>{r.saved_hours == null ? "—" : formatHours(Math.abs(r.saved_hours))}</b>
                         </span>
                       </span>
@@ -240,7 +233,7 @@ function EffortPanel({ effort }: { effort: Effort | null }) {
             </div>
             {unknown.length > 0 && (
               <p className="muted small">
-                「—」の業務は、月の件数が分からないため出せません。業務ページの「業務情報を編集」で月の件数を入れるか、版ごとに削減工数を入力してください。
+                「—」の業務は、月の件数が分からないため出せません。業務ページの「業務情報を編集」で、月の件数（または「日30件」のような頻度）を入れてください。
               </p>
             )}
             {effort.months.length > 1 && (
@@ -296,7 +289,7 @@ function DiagnosisForm({
       className="card diag-form"
       onSubmit={(e) => {
         e.preventDefault();
-        if (f.date) onSave({ ...f, version_ids: Object.values(picked) });
+        if (f.date) onSave({ ...f, kind: "annual", version_ids: Object.values(picked) });
       }}
     >
       <strong>{initial ? "記録の詳細" : "診断を記録"}</strong>
@@ -304,16 +297,6 @@ function DiagnosisForm({
         <label>
           実施日
           <input type="date" required value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
-        </label>
-        <label>
-          種類
-          <select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as DiagnosisIn["kind"] })}>
-            {DIAGNOSIS_KINDS.map((k) => (
-              <option key={k} value={k}>
-                {DIAGNOSIS_LABEL[k]}
-              </option>
-            ))}
-          </select>
         </label>
         <label className="grow">
           参加者
@@ -362,7 +345,7 @@ function DiagnosisForm({
                       ))}
                     </select>
                   ) : (
-                    <span className="muted small">この記録には含めません</span>
+                    <span className="small">この記録には含めません</span>
                   )}
                 </li>
               );

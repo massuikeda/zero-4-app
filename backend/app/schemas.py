@@ -314,13 +314,7 @@ class VersionRef(BaseModel):
     saved_by: str
     minutes: int = 0  # 作業時間の合計（1回あたり・分）
     # 削減工数（月あたり・時間）。第1版とくらべて、どれだけ減ったか
-    saved_hours_input: Optional[float] = None  # 手で入力した値（なければ None）
-    saved_hours_auto: Optional[float] = None   # 自動の値＝（第1版の時間 − この版の時間）× 月の件数。月の件数が分からなければ None
-    saved_hours: Optional[float] = None        # 使う値（入力があれば入力、なければ自動）
-
-
-class SavedHoursIn(BaseModel):
-    value: Optional[float] = Field(None, ge=-1e9, le=1e9)  # None で、入力を消して自動の値に戻す
+    saved_hours: Optional[float] = None  # ＝（第1版の時間 − この版の時間）× 月の件数。月の件数が分からなければ None
 
 
 class EffortBusiness(BaseModel):

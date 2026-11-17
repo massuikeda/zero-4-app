@@ -5,7 +5,7 @@ import "@fontsource-variable/noto-sans-jp";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ミエルMAP｜業務の見える化マップ",
+  title: "AWASERU",
   description: "企業ごとの業務フロー（AS-IS / TO-BE）を決まった型で作成・管理する",
 };
 

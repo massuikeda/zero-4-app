@@ -54,6 +54,41 @@ export default function Home() {
       <h1>企業一覧</h1>
       {error && <div className="alert">{error}</div>}
 
+      <div className="table-wrap">
+        <table className="plain company-table">
+          <thead>
+            <tr>
+              <th>企業名</th>
+              <th>業種</th>
+              <th className="num">従業員数</th>
+              <th className="num">業務数</th>
+            </tr>
+          </thead>
+          <tbody>
+            {companies.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="muted">
+                  企業がまだありません。下のフォームから追加してください。
+                </td>
+              </tr>
+            ) : (
+              companies.map((c) => (
+                <tr key={c.id}>
+                  <td>
+                    <Link href={`/companies/${c.id}`} className="company-link">
+                      {c.name}
+                    </Link>
+                  </td>
+                  <td>{c.industry || <span className="muted">—</span>}</td>
+                  <td className="num">{formatEmployees(c.employees)}</td>
+                  <td className="num">{c.business_count}件</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
       <form
         className="card dashed company-add"
         onSubmit={(e) => {
@@ -98,41 +133,6 @@ export default function Home() {
         </div>
         {employeesInvalid && <span className="small error-text">従業員数は0以上の整数で入力してください</span>}
       </form>
-
-      <div className="table-wrap">
-        <table className="plain company-table">
-          <thead>
-            <tr>
-              <th>企業名</th>
-              <th>業種</th>
-              <th className="num">従業員数</th>
-              <th className="num">業務数</th>
-            </tr>
-          </thead>
-          <tbody>
-            {companies.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="muted">
-                  企業がまだありません。上のフォームから追加してください。
-                </td>
-              </tr>
-            ) : (
-              companies.map((c) => (
-                <tr key={c.id}>
-                  <td>
-                    <Link href={`/companies/${c.id}`} className="company-link">
-                      {c.name}
-                    </Link>
-                  </td>
-                  <td>{c.industry || <span className="muted">—</span>}</td>
-                  <td className="num">{formatEmployees(c.employees)}</td>
-                  <td className="num">{c.business_count}件</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }

@@ -168,9 +168,9 @@ export interface TobePlan {
 }
 
 // ---------------- AS-ISの版と、診断の記録（履歴） ----------------
-export const DIAGNOSIS_KINDS = ["annual", "proposal"] as const;
-export type DiagnosisKind = (typeof DIAGNOSIS_KINDS)[number];
-export const DIAGNOSIS_LABEL: Record<DiagnosisKind, string> = { annual: "DX診断", proposal: "改善提案" };
+/** 記録の種類。いまは「DX診断」だけ（以前あった「改善提案」の記録も、DX診断として表示する） */
+export type DiagnosisKind = "annual" | "proposal";
+export const DIAGNOSIS_LABEL: Record<DiagnosisKind, string> = { annual: "DX診断", proposal: "DX診断" };
 
 /** 経営者の見立てと現場の実態のずれ（1件） */
 export interface Gap {
@@ -207,11 +207,7 @@ export interface VersionRef {
   saved_by: string;
   /** 作業時間の合計（1回あたり・分） */
   minutes: number;
-  /** 削減工数（月あたり・時間）を手で入力した値。なければ null */
-  saved_hours_input: number | null;
-  /** 自動の値＝（第1版の時間 − この版の時間）× 月の件数。月の件数が分からなければ null */
-  saved_hours_auto: number | null;
-  /** 使う値（入力があれば入力、なければ自動） */
+  /** 削減工数（月あたり・時間）＝（第1版の時間 − この版の時間）× 月の件数。月の件数が分からなければ null */
   saved_hours: number | null;
 }
 

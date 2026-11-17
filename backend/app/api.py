@@ -26,7 +26,7 @@ from .schemas import (
 )
 from .schemas import (  # noqa: I001
     AsisVersionOut, DiagnosisIn, DiagnosisOut, DiagnosisRef, DiagnosisVersion, EffortBusiness, EffortMonth, EffortOut,
-    Metrics, SavedHoursIn, VersionRef,
+    Metrics, VersionRef,
 )
 from .schemas import LoginIn, PasswordChangeIn, PasswordResetIn  # noqa: I001
 
@@ -592,11 +592,9 @@ def _first_minutes(db: Session, business_ids: list[int]) -> dict[int, int]:
 def _version_ref(v: FlowVersion, first_minutes: int, count: int | None) -> VersionRef:
     """版の見出し。削減工数は、第1版の作業時間（first_minutes）と月の件数（count）から出す"""
     minutes = effort.total_minutes(v.data)
-    auto = effort.auto_saved_hours(first_minutes, minutes, count)
     return VersionRef(
         id=v.id, business_id=v.business_id, number=v.number, saved_at=v.saved_at, saved_by=v.saved_by, minutes=minutes,
-        saved_hours_input=v.saved_hours, saved_hours_auto=auto,
-        saved_hours=v.saved_hours if v.saved_hours is not None else auto,
+        saved_hours=effort.auto_saved_hours(first_minutes, minutes, count),
     )
 
 
@@ -628,19 +626,6 @@ def list_company_versions(cid: int, user: User = Depends(current_user), db: Sess
     first = _first_minutes(db, [b.id for b in c.businesses])
     count = {b.id: effort.monthly_count(b) for b in c.businesses}
     return [_version_ref(v, first.get(v.business_id, 0), count.get(v.business_id)) for v in db.scalars(q)]
-
-
-@app.put("/api/versions/{vid}/saved-hours", response_model=VersionRef)
-def set_saved_hours(vid: int, body: SavedHoursIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """版ごとの削減工数（月あたり・時間）を手で入力する（実績など）。value=null で入力を消して、自動の値に戻す。
-    AS-ISを編集できる人（銀行担当者・その企業の担当者）が入力できる"""
-    v = db.get(FlowVersion, vid)
-    if not v:
-        raise HTTPException(404, "AS-ISの版が見つかりません")
-    b = get_business_or_404(db, user, v.business_id)
-    v.saved_hours = body.value
-    db.commit()
-    return _version_ref(v, _first_minutes(db, [b.id]).get(b.id, 0), effort.monthly_count(b))
 
 
 @app.get("/api/companies/{cid}/effort", response_model=EffortOut)

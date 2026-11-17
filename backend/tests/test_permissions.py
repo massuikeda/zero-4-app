@@ -383,8 +383,8 @@ def test_first_version_for_existing_asis():
         c.delete(f"/api/businesses/{bid}", headers=ADMIN)
 
 
-def test_saved_hours_per_version():
-    """削減工数（月あたり・時間）：第1版とくらべた自動の値。版ごとに手で入力もできる。企業ぜんたいの合計と月ごとの推移"""
+def test_saved_hours_from_first_version():
+    """削減工数（月あたり・時間）：AS-ISの第1版とくらべた値。企業ぜんたいの合計と、月ごとの推移"""
     from datetime import datetime
 
     from app import effort
@@ -415,36 +415,26 @@ def test_saved_hours_per_version():
         d = save(bid, flow(30), d["version"])      # 第3版：30分 → 30分 × 600件 ＝ 月300時間
         save(bid2, flow(15), 0)                    # 月の件数が分からない業務
         vs = c.get(f"/api/businesses/{bid}/versions", headers=member).json()
-        assert [(v["minutes"], v["saved_hours_auto"], v["saved_hours_input"], v["saved_hours"]) for v in vs] == [
-            (60, 0.0, None, 0.0), (50, 100.0, None, 100.0), (30, 300.0, None, 300.0)]
-        v_other = c.get(f"/api/businesses/{bid2}/versions", headers=ADMIN).json()[0]
-        assert (v_other["saved_hours_auto"], v_other["saved_hours"]) == (None, None)
+        assert [(v["minutes"], v["saved_hours"]) for v in vs] == [(60, 0.0), (50, 100.0), (30, 300.0)]
+        assert c.get(f"/api/businesses/{bid2}/versions", headers=ADMIN).json()[0]["saved_hours"] is None
+        assert "saved_hours_input" not in vs[0]  # 手で入力する仕組みはなくした
+        assert c.put(f"/api/versions/{vs[2]['id']}/saved-hours", json={"value": 1}, headers=ADMIN).status_code == 404
 
-        # 手で入力すると、その値を使う（企業担当者も入力できる）。空に戻すと自動の値
-        r = c.put(f"/api/versions/{vs[2]['id']}/saved-hours", json={"value": 250.5}, headers=member)
-        assert r.status_code == 200 and (r.json()["saved_hours_input"], r.json()["saved_hours"], r.json()["saved_hours_auto"]) == (250.5, 250.5, 300.0)
-        assert c.put(f"/api/versions/{vs[2]['id']}/saved-hours", json={"value": "たくさん"}, headers=ADMIN).status_code == 422
-        assert c.put(f"/api/versions/{vs[2]['id']}/saved-hours", json={"value": 1}, headers=TANAKA).status_code == 404  # 他社
-        assert c.put("/api/versions/999999/saved-hours", json={"value": 1}, headers=ADMIN).status_code == 404
-        c.put(f"/api/versions/{v_other['id']}/saved-hours", json={"value": 12}, headers=ADMIN)  # 月の件数がなくても入力はできる
-        refs = {r["id"]: r for r in c.get(f"/api/companies/{co}/versions", headers=ADMIN).json()}
-        assert refs[vs[2]["id"]]["saved_hours"] == 250.5 and refs[v_other["id"]]["saved_hours"] == 12
-
-        # 診断の記録には、選んだ版の削減工数が出る（第2版を選べば100時間、いちばん新しい版なら 250.5 ＋ 12）
+        # 診断の記録には、選んだ版の削減工数が出る（第2版を選べば100時間、いちばん新しい版なら300時間）
         dg = c.post(f"/api/companies/{co}/diagnoses", json={"date": "2026-10-20", "version_ids": [vs[1]["id"]]}, headers=ADMIN).json()
         assert (dg["saved_hours"], dg["versions"][0]["saved_hours"]) == (100.0, 100.0)
         dg = c.post(f"/api/companies/{co}/diagnoses", json={"date": "2026-11-10"}, headers=ADMIN).json()
-        assert dg["saved_hours"] == 262.5 and [v["saved_hours"] for v in dg["versions"]] == [250.5, 12.0]
-        # 企業ぜんたい：業務ごとに、いちばん新しい版の値。合計は 250.5 ＋ 12
+        assert dg["saved_hours"] == 300.0 and [v["saved_hours"] for v in dg["versions"]] == [300.0, None]
+        # 企業ぜんたい：業務ごとに、いちばん新しい版の値。月の件数が分からない業務は合計に入らない
         e = c.get(f"/api/companies/{co}/effort", headers=member).json()
-        assert e["total_hours"] == 262.5
-        # いまの作業時間（月あたり）＝いちばん新しい版の30分 × 600件。月の件数が分からない業務は出せない
+        assert e["total_hours"] == 300.0
+        # いまの作業時間（月あたり）＝いちばん新しい版の30分 × 600件
         assert e["current_hours"] == 300.0
         assert {b["name"]: b["current_hours"] for b in e["businesses"]} == {"受注": 300.0, "請求": None}
         by = {b["name"]: b for b in e["businesses"]}
-        assert (by["受注"]["versions"], by["受注"]["first_minutes"], by["受注"]["latest_minutes"], by["受注"]["monthly_count"], by["受注"]["saved_hours"]) == (3, 60, 30, 600, 250.5)
-        assert (by["請求"]["monthly_count"], by["請求"]["saved_hours"]) == (None, 12)
-        assert len(e["months"]) == 1 and e["months"][0]["hours"] == 262.5
+        assert (by["受注"]["versions"], by["受注"]["first_minutes"], by["受注"]["latest_minutes"], by["受注"]["monthly_count"], by["受注"]["saved_hours"]) == (3, 60, 30, 600, 300.0)
+        assert (by["請求"]["monthly_count"], by["請求"]["saved_hours"]) == (None, None)
+        assert len(e["months"]) == 1 and e["months"][0]["hours"] == 300.0
         assert c.get(f"/api/companies/{co}/effort", headers=TANAKA).status_code == 404
 
         # 月ごとの推移：その月の終わりの時点でいちばん新しかった版の値（第1版を9月、第2版を10月に保存したことにする）
@@ -454,12 +444,8 @@ def test_saved_hours_per_version():
             db.commit()
         months = c.get(f"/api/companies/{co}/effort", headers=ADMIN).json()["months"]
         assert [(m["month"], m["hours"]) for m in months][:2] == [("2026-09", 0.0), ("2026-10", 100.0)]
-        assert months[-1]["hours"] == 262.5 and len(months) >= 3
-        # 入力を消すと自動の値に戻る
-        r = c.put(f"/api/versions/{vs[2]['id']}/saved-hours", json={"value": None}, headers=ADMIN).json()
-        assert (r["saved_hours_input"], r["saved_hours"]) == (None, 300.0)
-        # 月の件数を入れると、自動の値もそれで出る
+        assert months[-1]["hours"] == 300.0 and len(months) >= 3
+        # 月の件数を入れると、それで計算する
         c.put(f"/api/businesses/{bid}", json={"name": "受注", "department": "", "frequency": "日30件", "description": "", "monthly_count": 60}, headers=ADMIN)
         assert c.get(f"/api/businesses/{bid}/versions", headers=ADMIN).json()[2]["saved_hours"] == 30.0
         c.delete(f"/api/companies/{co}", headers=ADMIN)
-

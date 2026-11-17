@@ -599,7 +599,8 @@ table.plan-summary tr.adopted td { background: var(--accent-soft); }
 .cost-basis a { color: var(--accent); }
 
 /* ---------- 診断の履歴（企業ページ） ---------- */
-.company-head { gap: 12px; padding: 20px 22px; }
+/* 企業名の行。白い枠には入れず、画面の地の上にそのまま置く */
+.company-head { background: transparent; border: 0; padding: 4px 0 0; gap: 12px; }
 .company-head h1 { font-size: 24px; }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tag { display: inline-block; font-size: 12px; padding: 2px 10px; border-radius: 99px; background: #eef0f3; color: #3b4658; white-space: nowrap; }
@@ -617,17 +618,14 @@ table.plan-summary tr.adopted td { background: var(--accent-soft); }
 .diag-card header { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .diag-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .diag-title time { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.diag-badge { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 6px; }
-.diag-badge.annual { background: #14315a; color: #fff; }
-.diag-badge.proposal { background: var(--accent-soft); color: var(--accent); }
 .diag-line, .diag-note { margin: 0; }
 .diag-note { white-space: pre-wrap; }
 .diag-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .diag-actions { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }
 .diag-form { gap: 12px; border-color: var(--accent); }
-.diag-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.diag-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink); }
 .diag-form label.check { flex-direction: row; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--ink); }
-.diag-form .form-label { font-size: 12px; color: var(--muted); }
+.diag-form .form-label { font-size: 12px; color: var(--ink); }
 .form-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
 .form-row label.grow { flex: 1 1 200px; min-width: 0; }
 .form-row input.narrow { width: 90px; }
@@ -650,9 +648,7 @@ table.plan-summary tr.adopted td { background: var(--accent-soft); }
 .version-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
 .version-list li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 300px); align-items: center; gap: 12px; padding: 8px 12px; min-height: 34px; }
 .version-list li + li { border-top: 1px solid var(--line); }
-.version-list li.off { background: #f7f8fa; }
 .diag-form .version-check { flex-direction: row; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; color: var(--ink); cursor: pointer; }
-.version-list li.off .version-check { font-weight: 500; color: var(--muted); }
 .version-check input { width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
 .version-list select { width: 100%; }
 @media (max-width: 640px) { .version-list li { grid-template-columns: 1fr; } }
@@ -662,8 +658,10 @@ table.plan-summary tr.adopted td { background: var(--accent-soft); }
 .diag-flows .link span { margin-left: 8px; font-size: 12px; font-weight: 500; color: var(--muted); }
 .diag-saved { font-size: 15px; font-weight: 700; color: var(--good); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .diag-saved.minus { color: var(--danger); }
-/* 企業ページの上：業種と従業員だけを、黒い文字で出す */
-.company-facts { margin: 6px 0 0; color: var(--ink); font-size: 15px; }
+/* 企業ページの上：企業名の横に、業種と従業員を小さく黒い文字で出す */
+.company-name { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; }
+.company-name small { font-size: 14px; font-weight: 500; color: var(--ink); }
+.company-users-link { font-size: 14px; font-weight: 700; margin-left: 8px; }
 /* ---------- 削減工数（第1版とくらべて。月あたり・時間） ---------- */
 .effort-panel { gap: 12px; }
 .effort-hero { display: flex; flex-direction: column; gap: 2px; }
@@ -689,15 +687,6 @@ table.plan-summary tr.adopted td { background: var(--accent-soft); }
 /* いまの作業時間：減った時間（緑）より一段小さく、濃い紺で出す */
 .effort-hero.now { border-top: 1px solid var(--line); padding-top: 12px; }
 .effort-hero.now .effort-big { font-size: 32px; color: #14315a; }
-.effort-box { border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-.effort-box > summary { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 10px 14px; cursor: pointer; }
-.effort-box > summary strong { font-size: 20px; color: var(--good); font-variant-numeric: tabular-nums; }
-.effort-box > summary strong.minus { color: var(--danger); }
-.effort-title { font-weight: 700; }
-.effort-box > .stack { padding: 4px 14px 14px; }
-table.effort-table { font-size: 14px; }
-.hours-input { width: 110px; text-align: right; }
-.hours-input[aria-invalid="true"] { border-color: var(--danger); }
 .trend { display: block; width: 100%; max-width: 720px; height: auto; }
 .trend-axis { stroke: #b9c1cd; stroke-width: 1; }
 .trend-bar { fill: #9fd0a3; }

@@ -91,9 +91,6 @@ export const api = {
   asisVersions: (bid: number) => call<AsisVersion[]>(`/api/businesses/${bid}/versions`),
   /** 企業の全業務の、AS-ISの版の見出し（診断を記録するときの選択肢） */
   companyVersions: (cid: number) => call<VersionRef[]>(`/api/companies/${cid}/versions`),
-  /** 版ごとの削減工数（月あたり・時間）を手で入力する（null で入力を消して、自動の値に戻す） */
-  setSavedHours: (vid: number, value: number | null) =>
-    call<VersionRef>(`/api/versions/${vid}/saved-hours`, { method: "PUT", body: { value } }),
   /** 企業の全業務の削減工数（月あたり・時間）と、月ごとの推移 */
   companyEffort: (cid: number) => call<Effort>(`/api/companies/${cid}/effort`),
 

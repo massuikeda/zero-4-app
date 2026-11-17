@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from datetime import date as date_
 
 from sqlalchemy import (
-    JSON, Column, Date, DateTime, Float, ForeignKey, Integer, String, Table, Text, UniqueConstraint, create_engine,
+    JSON, Column, Date, DateTime, ForeignKey, Integer, String, Table, Text, UniqueConstraint, create_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
@@ -144,8 +144,6 @@ class FlowVersion(Base):
     data: Mapped[dict] = mapped_column(JSON)  # schemas.Flow の JSON
     saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     saved_by: Mapped[str] = mapped_column(String(200), default="")
-    # 削減工数（月あたり・時間）を手で入力した値。空なら、第1版との作業時間の差から自動で出す（effort.py）
-    saved_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     business: Mapped[Business] = relationship(back_populates="versions")
     links: Mapped[list["DiagnosisFlow"]] = relationship(back_populates="version", cascade="all, delete-orphan")
@@ -237,7 +235,6 @@ _ADDED_COLUMNS = [
     ("users", "password_hash", "VARCHAR(255) NOT NULL DEFAULT ''"),
     ("users", "failed_logins", "INTEGER NOT NULL DEFAULT 0"),
     ("users", "locked_until", "DATETIME NULL"),
-    ("flow_versions", "saved_hours", "FLOAT NULL"),
 ]
 
 

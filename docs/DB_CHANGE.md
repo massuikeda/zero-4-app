@@ -7,7 +7,7 @@ TO-BEの1本化と、AS-ISの版・診断の履歴の追加で、DBに足すも�
 
 | 種類 | 名前 | 中身 |
 |---|---|---|
-| テーブルを追加 | `flow_versions` | AS-ISの版。AS-ISを保存するたびに、その時点の中身が1行増える。版ごとに入力した削減工数（`saved_hours`）もここに入る |
+| テーブルを追加 | `flow_versions` | AS-ISの版。AS-ISを保存するたびに、その時点の中身が1行増える |
 | テーブルを追加 | `diagnoses` | 診断の記録（DX診断・改善提案） |
 | テーブルを追加 | `diagnosis_flows` | 診断の記録と、そのとき選んだAS-ISの版の結び付き |
 
@@ -38,7 +38,7 @@ TO-BEの1本化と、AS-ISの版・診断の履歴の追加で、DBに足すも�
 1. `main` に push する（バックエンドがデプロイされる）
 2. 起動時に `init_db` が、足りないテーブル3つを足し、いまのAS-ISを第1版として入れる
 3. `<バックエンドのURL>/api/health` が `{"status":"ok","db":"mysql",...}` を返すことを確かめる
-4. 企業ページを開いて「診断・ヒアリングの履歴」タブが出ることを確かめる
+4. 企業ページを開いて「ヒアリング履歴」タブが出ることを確かめる
 
 **B. 先に手でSQLを流す（デプロイの前に、DBだけ先に用意したいとき）**
 
@@ -52,7 +52,6 @@ CREATE TABLE flow_versions (
   data JSON NOT NULL,
   saved_at DATETIME NOT NULL,
   saved_by VARCHAR(200) NOT NULL,
-  saved_hours FLOAT,
   PRIMARY KEY (id),
   UNIQUE (business_id, number),
   FOREIGN KEY(business_id) REFERENCES businesses (id) ON DELETE CASCADE
@@ -108,12 +107,14 @@ CREATE INDEX ix_diagnosis_flows_version_id ON diagnosis_flows (version_id);
 
 - `flow_snapshots`：版を「診断を記録したときの写し」として持っていたころのテーブル。起動時に、中身が同じ版へつなぎ直してある
 - `kpis`・`kpi_values`・`companies.kpi_enabled`：外したKPIの機能のもの
+- `flow_versions.saved_hours`：外した「削減工数の手入力」の列
 
 ```sql
 DROP TABLE flow_snapshots;
 DROP TABLE kpi_values;
 DROP TABLE kpis;
 ALTER TABLE companies DROP COLUMN kpi_enabled;
+ALTER TABLE flow_versions DROP COLUMN saved_hours;
 ```
 
 ## 片付け（やってもやらなくてもよい）
