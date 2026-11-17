@@ -46,7 +46,7 @@ input[readonly], select:disabled { background: #f8f9fb; }
   padding: 10px 24px; background: #fff; color: var(--ink); border-bottom: 1px solid var(--line);
 }
 .brand { display: flex; align-items: center; }
-/* ロゴ（ミエルMAP）。青いロゴなので、上のバーは白にしている */
+/* ロゴ（AWASERU）。青いロゴなので、上のバーは白にしている */
 .logo-img { display: block; height: 40px; width: auto; }
 .topbar-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .dev-badge { background: var(--warn); color: #fff; font-size: 12px; padding: 2px 8px; border-radius: 99px; }
@@ -587,22 +587,9 @@ table.plain .saved.minus { color: var(--danger); }
 table.plan-summary tr.adopted td { background: var(--accent-soft); }
 @media (max-width: 720px) { .plan-tabs { grid-template-columns: 1fr; } }
 
-/* 単価表・費用対効果 */
+/* 上のバーのリンク・時給・月の削減額 */
 .top-link { color: var(--accent); font-size: 13px; font-weight: 600; text-decoration: none; }
 .top-link:hover { text-decoration: underline; }
-.cost-table input { width: 100%; padding: 6px 8px; font-size: 14px; }
-.cost-table input.yen { text-align: right; max-width: 140px; font-variant-numeric: tabular-nums; }
-.cost-add .field { display: flex; flex-direction: column; gap: 4px; flex: 1 1 200px; min-width: 0; }
-.cost-add .field.narrow { flex: 0 1 150px; }
-.cost-add .row { align-items: flex-end; }
-.cost-add input[aria-invalid="true"], .wage-edit input[aria-invalid="true"] { border-color: var(--danger); }
-.wage-edit { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
-.wage-edit label { display: flex; flex-direction: column; gap: 2px; }
-.wage-edit input { width: 120px; text-align: right; }
-.cost-edit { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
-.cost-edit-label { font-weight: 700; }
-.cost-edit select, .cost-edit .cost-other { font-size: 12px; padding: 3px 6px; }
-.cost-edit .cost-other { width: 150px; }
 .chip { display: inline-flex; align-items: center; gap: 4px; background: #fff; border: 1px solid #c5dbf2; border-radius: 99px; padding: 1px 4px 1px 10px; }
 .chip.unknown { border-color: #e0b070; background: #fff8ec; }
 .chip em { font-style: normal; font-size: 11px; color: var(--warn); }
@@ -610,3 +597,114 @@ table.plan-summary tr.adopted td { background: var(--accent-soft); }
 .chip button:hover { color: var(--danger); }
 .estimate { color: var(--warn); font-weight: 700; }
 .cost-basis a { color: var(--accent); }
+
+/* ---------- 診断の履歴（企業ページ） ---------- */
+.company-head { gap: 12px; padding: 20px 22px; }
+.company-head h1 { font-size: 24px; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tag { display: inline-block; font-size: 12px; padding: 2px 10px; border-radius: 99px; background: #eef0f3; color: #3b4658; white-space: nowrap; }
+.tag.info { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.tag.good { background: #e8f5e9; color: var(--good); font-weight: 700; }
+.tag.warn { background: #fdeee4; color: #b3461f; font-weight: 700; }
+.tag.muted { background: #f3f4f6; color: var(--muted); }
+.section-title { margin: 0; font-size: 16px; }
+.nowrap { white-space: nowrap; }
+
+.history-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+@media (max-width: 980px) { .history-grid { grid-template-columns: 1fr; } }
+.diag-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; }
+.diag-card.latest { border: 2px solid var(--accent); }
+.diag-card header { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.diag-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.diag-title time { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.diag-badge { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 6px; }
+.diag-badge.annual { background: #14315a; color: #fff; }
+.diag-badge.proposal { background: var(--accent-soft); color: var(--accent); }
+.diag-line, .diag-note { margin: 0; }
+.diag-note { white-space: pre-wrap; }
+.diag-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.diag-actions { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }
+.diag-form { gap: 12px; border-color: var(--accent); }
+.diag-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.diag-form label.check { flex-direction: row; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--ink); }
+.diag-form .form-label { font-size: 12px; color: var(--muted); }
+.form-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.form-row label.grow { flex: 1 1 200px; min-width: 0; }
+.form-row input.narrow { width: 90px; }
+
+
+/* ---------- AS-ISの版（業務ページ） ---------- */
+.version-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.version-bar label { display: flex; align-items: center; gap: 8px; }
+.version-bar select { min-width: 280px; max-width: 100%; font-weight: 600; }
+.version-label { font-size: 12px; font-weight: 700; color: var(--muted); }
+.version-note { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; background: #fff8e6; border: 1px solid #f0d58c; border-radius: 8px; padding: 10px 14px; }
+.version-note > div { display: flex; flex-direction: column; gap: 2px; }
+.version-diff { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.version-diff > div { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.version-val { font-size: 16px; font-weight: 700; }
+.version-val em { font-style: normal; font-size: 13px; font-weight: 600; color: var(--muted); }
+.version-val em.better { color: var(--good); }
+.version-val em.worse { color: var(--danger); }
+/* 診断の記録：業務ごとに、AS-ISの版を選ぶ（チェックした業務だけ） */
+.version-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
+.version-list li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 300px); align-items: center; gap: 12px; padding: 8px 12px; min-height: 34px; }
+.version-list li + li { border-top: 1px solid var(--line); }
+.version-list li.off { background: #f7f8fa; }
+.diag-form .version-check { flex-direction: row; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; color: var(--ink); cursor: pointer; }
+.version-list li.off .version-check { font-weight: 500; color: var(--muted); }
+.version-check input { width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
+.version-list select { width: 100%; }
+@media (max-width: 640px) { .version-list li { grid-template-columns: 1fr; } }
+.diag-flows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.diag-flows li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 6px 0; border-top: 1px solid var(--line); }
+.diag-flows .link { font-size: 17px; font-weight: 700; }
+.diag-flows .link span { margin-left: 8px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.diag-saved { font-size: 15px; font-weight: 700; color: var(--good); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.diag-saved.minus { color: var(--danger); }
+/* 企業ページの上：業種と従業員だけを、黒い文字で出す */
+.company-facts { margin: 6px 0 0; color: var(--ink); font-size: 15px; }
+/* ---------- 削減工数（第1版とくらべて。月あたり・時間） ---------- */
+.effort-panel { gap: 12px; }
+.effort-hero { display: flex; flex-direction: column; gap: 2px; }
+.effort-big { font-size: 46px; font-weight: 800; line-height: 1.1; color: var(--good); font-variant-numeric: tabular-nums; }
+.effort-big small { font-size: 15px; font-weight: 700; margin-left: 6px; color: var(--ink); }
+.effort-big.minus { color: var(--danger); }
+.effort-cap { font-size: 13px; font-weight: 700; color: var(--ink); }
+/* 業務ごとの横棒。色だけに頼らないよう、数字と言葉（いま・減った時間）も棒の下に書く */
+.effort-chart { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.effort-legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+.effort-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.effort-legend i.now, .effort-bar .now { background: var(--accent); }
+.effort-legend i.saved, .effort-bar .saved { background: var(--good); }
+.effort-chart ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.effort-chart li { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.effort-chart li .link { font-weight: 700; }
+.effort-bar { display: flex; gap: 2px; height: 14px; min-width: 6px; }
+.effort-bar > span { display: block; height: 100%; flex-basis: 0; min-width: 3px; border-radius: 4px; }
+.effort-nums { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.effort-nums b { font-size: 14px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.effort-nums b.saved { color: var(--good); }
+.effort-nums b.minus { color: var(--danger); }
+/* いまの作業時間：減った時間（緑）より一段小さく、濃い紺で出す */
+.effort-hero.now { border-top: 1px solid var(--line); padding-top: 12px; }
+.effort-hero.now .effort-big { font-size: 32px; color: #14315a; }
+.effort-box { border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.effort-box > summary { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 10px 14px; cursor: pointer; }
+.effort-box > summary strong { font-size: 20px; color: var(--good); font-variant-numeric: tabular-nums; }
+.effort-box > summary strong.minus { color: var(--danger); }
+.effort-title { font-weight: 700; }
+.effort-box > .stack { padding: 4px 14px 14px; }
+table.effort-table { font-size: 14px; }
+.hours-input { width: 110px; text-align: right; }
+.hours-input[aria-invalid="true"] { border-color: var(--danger); }
+.trend { display: block; width: 100%; max-width: 720px; height: auto; }
+.trend-axis { stroke: #b9c1cd; stroke-width: 1; }
+.trend-bar { fill: #9fd0a3; }
+.trend-bar.latest { fill: var(--good); }
+.trend-bar.minus { fill: #e39a9a; }
+.trend-bar.minus.latest { fill: var(--danger); }
+.trend g:hover .trend-bar { fill: #1b5e20; }
+.trend g:hover .trend-bar.minus { fill: #a61f1f; }
+.trend-value { font-size: 12px; font-weight: 700; fill: var(--ink); }
+.trend-tick { font-size: 11px; fill: var(--muted); }

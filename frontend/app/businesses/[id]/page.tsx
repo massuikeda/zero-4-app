@@ -6,22 +6,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useMe } from "@/components/AppShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ComparisonView } from "@/components/ComparisonView";
+import { EffortChart } from "@/components/EffortChart";
 import { FlowBoard } from "@/components/FlowBoard";
 import { ApiError, api } from "@/lib/api";
-import { WORKDAYS_PER_MONTH, formatPayback, formatYen, monthlyCountOf, planCost, planEffect } from "@/lib/cost";
-import { normalize } from "@/lib/flow";
+import { monthlyCountOf } from "@/lib/cost";
+import { formatHours } from "@/lib/diagnosis";
+import { counters, normalize } from "@/lib/flow";
 import { parseHearing } from "@/lib/hearing";
 import { applyTobeChanges } from "@/lib/tobe";
 import {
-  FLOW_KINDS, PLANS, PLAN_DESC, PLAN_LABEL, emptyFlow, planKind,
-  type Business, type Company, type CostItem, type Flow, type FlowDoc, type FlowKind, type Plan, type Resource, type TobeKind,
+  DIAGNOSIS_LABEL, FLOW_KINDS, emptyFlow,
+  type AsisVersion, type Business, type Company, type Flow, type FlowDoc, type FlowKind, type Resource,
 } from "@/lib/types";
 
 type Tab = "notes" | "asis" | "tobe" | "compare";
-const LABEL: Record<FlowKind, string> = {
-  asis: "AS-IS", tobe_ume: "TO-BE（梅）", tobe_take: "TO-BE（竹）", tobe_matsu: "TO-BE（松）",
-};
-/** 4つの図（AS-IS と、TO-BEの梅・竹・松）それぞれに同じ初期値を持たせる */
+const LABEL: Record<FlowKind, string> = { asis: "AS-IS", tobe: "TO-BE" };
+/** 2つの図（AS-IS と TO-BE）それぞれに同じ初期値を持たせる */
 const forEachKind = <T,>(make: () => T) => Object.fromEntries(FLOW_KINDS.map((k) => [k, make()])) as Record<FlowKind, T>;
 
 interface Draft {
@@ -53,12 +53,10 @@ export default function BusinessPage() {
   const [business, setBusiness] = useState<Business | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
   const [resources, setResources] = useState<Resource[]>([]);
-  // 単価表（全企業共通）。TO-BEの案の費用（概算）に使う
-  const [costItems, setCostItems] = useState<CostItem[]>([]);
   const [drafts, setDrafts] = useState<Record<FlowKind, Draft | null>>(() => forEachKind(() => null));
-  // TO-BEタブ・比較タブで見ている案（梅・竹・松）
-  const [plan, setPlan] = useState<Plan>("take");
-  const tobeKind = planKind(plan);
+  // AS-ISの版（保存するたびに1つ残る。古い順）と、いま見ている版のID（null＝いまのAS-IS）
+  const [versions, setVersions] = useState<AsisVersion[]>([]);
+  const [viewing, setViewing] = useState<number | null>(null);
   const [notes, setNotes] = useState({ hearing_raw: "", hearing_notes: "", exec_view: "", field_view: "", dirty: false });
   // Azure OpenAI（ヒアリングボックス → 決まった形式）
   const [aiEnabled, setAiEnabled] = useState(false);
@@ -87,31 +85,22 @@ export default function BusinessPage() {
       setCompany(c);
       setResources(r);
       setNotes({ hearing_raw: b.hearing_raw, hearing_notes: b.hearing_notes, exec_view: b.exec_view, field_view: b.field_view, dirty: false });
-      // デプロイの途中など、バックエンドがまだ古い（3案に対応する前の）ときは plans が返ってこない。
-      // その間も画面が止まらないよう、案は「まだない」ものとして扱う
-      const plans = f.plans ?? {};
-      setDrafts({
-        asis: fromDoc(f.asis),
-        tobe_ume: fromDoc(plans.ume ?? null),
-        tobe_take: fromDoc(plans.take ?? null),
-        tobe_matsu: fromDoc(plans.matsu ?? null),
-      });
+      // デプロイの途中など、バックエンドがまだ古いときは tobe が返ってこない。
+      // その間も画面が止まらないよう、TO-BEは「まだない」ものとして扱う
+      setDrafts({ asis: fromDoc(f.asis), tobe: fromDoc(f.tobe ?? null) });
+      api.asisVersions(bid).then(setVersions, () => setVersions([]));
       // 開いたときのタブ：AS-ISがまだなければヒアリング、あればAS-IS。
       // 前に開いていた別の業務のタブが残らないよう、どちらの場合も決める（保存後の読み直しでは変えない）
       if (openedBid.current !== bid) {
         openedBid.current = bid;
         setTab(f.asis ? "asis" : "notes");
-        // 最初に見せる案：採用する案 → 作成済みの案（竹を優先）→ 竹
-        const made = (["take", "ume", "matsu"] as const).filter((p) => plans[p]);
-        setPlan(b.adopted_plan && plans[b.adopted_plan] ? b.adopted_plan : made[0] ?? "take");
+        setViewing(null);
       }
       api.config().then((x) => setAiEnabled(!!x.ai_enabled), () => setAiEnabled(false));
-      // 単価表と費用対効果は、銀行担当者だけが扱う（企業の方には見せない）
-      if (isAdmin) api.costItems().then(setCostItems, () => setCostItems([]));
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
     }
-  }, [bid, isAdmin]);
+  }, [bid]);
 
   useEffect(() => {
     if (me) load();
@@ -161,7 +150,8 @@ export default function BusinessPage() {
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
         e.preventDefault();
-        undo(tab === "asis" ? "asis" : tobeKind);
+        if (tab === "asis" && viewing !== null) return; // 過去の版を見ているときは、何もしない
+        undo(tab);
       }
     };
     window.addEventListener("keydown", key);
@@ -176,6 +166,8 @@ export default function BusinessPage() {
       const doc = await api.saveFlow(bid, kind, d.data, d.version);
       setDrafts((x) => ({ ...x, [kind]: fromDoc(doc) }));
       flash("ok", `${LABEL[kind]}を保存しました`);
+      api.business(bid).then(setBusiness, () => undefined); // 状況・削減時間を読み直す
+      if (kind === "asis") api.asisVersions(bid).then(setVersions, () => undefined); // 保存のたびに版が増える
     } catch (e) {
       flash("err", e instanceof ApiError && e.status === 409 ? `${e.message}（あなたの変更はまだ画面に残っています）` : String(e instanceof Error ? e.message : e));
     } finally {
@@ -220,11 +212,13 @@ export default function BusinessPage() {
       if (!drafts.asis) {
         const doc = await api.saveFlow(bid, "asis", parsed.flow, 0);
         setDrafts((x) => ({ ...x, asis: fromDoc(doc) }));
+        api.asisVersions(bid).then(setVersions, () => undefined);
         flash("ok", `AIでAS-ISを作成しました（${counts}）。図の上でそのまま直せます`);
       } else {
         edit("asis", parsed.flow);
         flash("ok", `AIでAS-ISを作り直しました（${counts}）。確認して「保存」すると確定します（「元に戻す」で前の状態に戻せます）`);
       }
+      setViewing(null);
       setTab("asis");
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
@@ -233,84 +227,25 @@ export default function BusinessPage() {
     }
   };
 
-  /** 未保存の案（梅・竹・松）をまとめて保存する */
-  const saveAllPlans = async () => {
-    setBusy(true);
-    try {
-      const done: string[] = [];
-      for (const p of PLANS) {
-        const k = planKind(p);
-        const d = drafts[k];
-        if (!d?.dirty) continue;
-        const doc = await api.saveFlow(bid, k, d.data, d.version);
-        setDrafts((x) => ({ ...x, [k]: fromDoc(doc) }));
-        done.push(PLAN_LABEL[p]);
-      }
-      if (done.length) flash("ok", `TO-BE（${done.join("・")}）を保存しました`);
-      setBusiness(await api.business(bid)); // 状況・削減時間を読み直す
-    } catch (e) {
-      flash("err", e instanceof ApiError && e.status === 409 ? `${e.message}（あなたの変更はまだ画面に残っています）` : String(e instanceof Error ? e.message : e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  /** 採用する案を選ぶ（業務一覧の削減時間に使う）。同じ案をもう一度選ぶと未選択に戻す */
-  const adopt = async (p: Plan) => {
-    if (!business) return;
-    try {
-      setBusiness(await api.setAdopted(bid, business.adopted_plan === p ? null : p));
-    } catch (e) {
-      flash("err", e instanceof Error ? e.message : String(e));
-    }
-  };
-
   /**
-   * AIでTO-BEを作る：保存済みのAS-IS → Azure OpenAI が梅・竹・松それぞれの「どの作業をどう変えるか」を出す
-   * → 決まったルールでAS-ISに当てはめて、3つの図にする。
-   * できた図は保存前の下書き。確認・手直ししてから保存で確定する（すでにある案は「元に戻す」で戻せる）
+   * AIでTO-BEを作る：保存済みのAS-IS → Azure OpenAI が「どの作業をどう変えるか」を出す
+   * → 決まったルールでAS-ISに当てはめて、図にする。
+   * できた図は保存前の下書き。確認・手直ししてから保存で確定する（すでにあるTO-BEは「元に戻す」で戻せる）
    */
   const createTobeWithAi = async () => {
     const asis = drafts.asis;
     if (!asis?.doc) return flash("err", "先にAS-ISを作成して保存してください");
     if (asis.dirty) return flash("err", "AS-ISに未保存の変更があります。先にAS-ISを保存してください");
-    const existing = PLANS.filter((p) => drafts[planKind(p)]);
-    if (
-      existing.length &&
-      !confirm(`いまのTO-BE（${existing.map((p) => PLAN_LABEL[p]).join("・")}）を、AIの改善案で作り直しますか？（保存するまでは「元に戻す」で戻せます）`)
-    ) {
-      return;
-    }
+    if (drafts.tobe && !confirm("いまのTO-BEを、AIの改善案で作り直しますか？（保存するまでは「元に戻す」で戻せます）")) return;
     setAiBusy(true);
     try {
       const s = await api.suggestTobe(bid);
-      const made: { plan: Plan; kind: TobeKind; flow: Flow }[] = [];
-      for (const p of PLANS) {
-        const sp = s.plans[p];
-        if (!sp) continue;
-        const r = applyTobeChanges(asis.doc.data, sp.changes, resources, { summary: sp.summary, needs: sp.needs, cost_items: sp.cost_items });
-        if (r.applied > 0) made.push({ plan: p, kind: planKind(p), flow: r.flow });
-      }
-      if (made.length === 0) throw new Error("AIの改善案をAS-ISに当てはめられませんでした。もう一度お試しください");
-      // すでにある案は、「元に戻す」で戻せるように履歴へ入れる
-      for (const m of made) {
-        const prev = drafts[m.kind]?.data;
-        const h = history.current[m.kind];
-        if (prev) h.stack.push(prev);
-        h.at = 0;
-        h.merge = false;
-      }
-      setHistoryTick((n) => n + 1);
-      setDrafts((d) => {
-        const out = { ...d };
-        for (const m of made) out[m.kind] = { ...(d[m.kind] ?? { version: 0, doc: null }), data: m.flow, dirty: true };
-        return out;
-      });
-      if (!made.some((m) => m.plan === plan)) setPlan(made[0].plan);
+      const r = applyTobeChanges(asis.doc.data, s.changes, resources, { summary: s.summary, needs: s.needs });
+      if (r.applied === 0) throw new Error("AIの改善案をAS-ISに当てはめられませんでした。もう一度お試しください");
+      // すでにあるTO-BEは「元に戻す」で戻せるように、履歴へ入れる（edit がやる）
+      edit("tobe", r.flow);
       setTab("tobe");
-      const names = made.map((m) => PLAN_LABEL[m.plan]).join("・");
-      const missing = PLANS.filter((p) => !made.some((m) => m.plan === p)).map((p) => PLAN_LABEL[p]);
-      flash("ok", `AIが${names}の案を作成しました。内容を確認して保存してください${missing.length ? `（${missing.join("・")}は作成できませんでした）` : ""}`);
+      flash("ok", `AIがTO-BEを作成しました（変更${r.applied}件）。内容を確認して保存してください`);
     } catch (e) {
       flash("err", e instanceof Error ? e.message : String(e));
     } finally {
@@ -318,23 +253,19 @@ export default function BusinessPage() {
     }
   };
 
-  /** いま見ている案（梅・竹・松）を、AS-ISのコピーか白紙から作る */
+  /** TO-BEを、AS-ISのコピーか白紙から作る */
   const startTobe = async (fromAsis: boolean) => {
-    const kind = tobeKind;
     if (fromAsis) {
       if (drafts.asis?.dirty) return flash("err", "先にAS-ISを保存してください");
       try {
-        const doc = await api.copyAsisToTobe(bid, kind);
-        setDrafts((x) => ({ ...x, [kind]: fromDoc(doc) }));
+        const doc = await api.copyAsisToTobe(bid);
+        setDrafts((x) => ({ ...x, tobe: fromDoc(doc) }));
         setBusiness(await api.business(bid));
       } catch (e) {
         flash("err", e instanceof Error ? e.message : String(e));
       }
     } else {
-      setDrafts((x) => ({
-        ...x,
-        [kind]: { data: { lanes: x.asis?.data.lanes ?? [], steps: [] }, version: 0, dirty: true, doc: null },
-      }));
+      setDrafts((x) => ({ ...x, tobe: { data: { lanes: x.asis?.data.lanes ?? [], steps: [] }, version: 0, dirty: true, doc: null } }));
     }
   };
 
@@ -384,39 +315,13 @@ export default function BusinessPage() {
   /** 1件あたりの時間＝各作業の所要時間の合計（作業が無ければ null） */
   const total = (d: Draft | null) =>
     d && d.data.steps.length ? d.data.steps.reduce((n, st) => n + (st.minutes || 0), 0) : null;
-  // TO-BE側は、採用する案（未選択なら、いま見ている案）の時間を出す
-  const shownPlan: Plan = business.adopted_plan || plan;
-  const perCase = { asis: total(drafts.asis), tobe: total(drafts[planKind(shownPlan)]) };
-  const dirtyPlans = PLANS.filter((p) => drafts[planKind(p)]?.dirty);
-
-  /** 案の切り替え（梅・竹・松）。案ごとの状態（未作成・削減時間・未保存・採用）も出す */
-  const planPicker = (
-    <div className="plan-tabs" role="tablist" aria-label="TO-BEの案">
-      {PLANS.map((p) => {
-        const d = drafts[planKind(p)];
-        const t = total(d);
-        const saved = perCase.asis !== null && t !== null ? perCase.asis - t : null;
-        return (
-          <button key={p} role="tab" aria-selected={plan === p} className={`plan-tab ${p}${plan === p ? " on" : ""}`} onClick={() => setPlan(p)}>
-            <span className="plan-name">
-              {PLAN_LABEL[p]}
-              {business.adopted_plan === p && <em className="plan-adopted">採用</em>}
-              {d?.dirty && <span className="dot" title="未保存" />}
-            </span>
-            <span className="plan-desc">{PLAN_DESC[p]}</span>
-            <span className={d ? "plan-state" : "plan-state none"}>
-              {!d ? "未作成" : saved === null ? "作成済" : `削減 ${saved < 0 ? "−" : ""}${fmtMin(Math.abs(saved))}／回`}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
+  const perCase = { asis: total(drafts.asis) };
+  const viewed = viewing === null ? null : versions.find((v) => v.id === viewing) ?? null;
 
   const tabs: [Tab, string, boolean][] = [
     ["notes", "ヒアリング", notes.dirty],
     ["asis", "AS-IS（現状）", !!drafts.asis?.dirty],
-    ["tobe", "TO-BE（改善後）", dirtyPlans.length > 0],
+    ["tobe", "TO-BE（改善後）", !!drafts.tobe?.dirty],
     ["compare", "比較", false],
   ];
 
@@ -436,22 +341,20 @@ export default function BusinessPage() {
       }
       return (
         <div className="empty-state">
-          <p>
-            TO-BE（{PLAN_LABEL[plan]}：{PLAN_DESC[plan]}）はまだありません。
-          </p>
+          <p>TO-BE（改善後の目指す姿）はまだありません。</p>
           {aiEnabled && (
             <>
               <button className="btn primary" disabled={!drafts.asis?.doc || aiBusy} onClick={createTobeWithAi}>
-                {aiBusy ? "AIが梅・竹・松の3案を作成しています…（1〜2分かかることがあります）" : "AIで梅・竹・松の3案を作成"}
+                {aiBusy ? "AIがTO-BEを作成しています…（1〜2分かかることがあります）" : "AIでTO-BEを作成"}
               </button>
               <p className="muted small">
-                AS-ISの作業・時間・ボトルネックをもとに、AIが改善案を3つ（梅・竹・松）まとめて作ります。できた図は、確認・手直ししてから保存できます。
+                AS-ISの作業・時間・ボトルネックをもとに、AIが改善案（RPA・システム連携などで自動化した姿）を作ります。できた図は、確認・手直ししてから保存できます。
               </p>
             </>
           )}
           <div className="row gap center">
             <button className={aiEnabled ? "btn ghost" : "btn primary"} disabled={!drafts.asis?.doc} onClick={() => startTobe(true)}>
-              {aiEnabled ? `AS-ISをコピーして${PLAN_LABEL[plan]}を作成` : `AS-ISをコピーして${PLAN_LABEL[plan]}を作成（おすすめ）`}
+              {aiEnabled ? "AS-ISをコピーして作成" : "AS-ISをコピーして作成（おすすめ）"}
             </button>
             <button className="btn ghost" onClick={() => startTobe(false)}>
               白紙から作成
@@ -481,7 +384,7 @@ export default function BusinessPage() {
             </button>
             {isTobe && aiEnabled && (
               <button className="btn ghost" onClick={createTobeWithAi} disabled={aiBusy || !drafts.asis?.doc}>
-                {aiBusy ? "AIが3案を作成しています…" : "AIで3案を作り直す"}
+                {aiBusy ? "AIがTO-BEを作成しています…" : "AIで作り直す"}
               </button>
             )}
             <button className="btn ghost" onClick={() => exportPdf(kind)} disabled={d.data.steps.length === 0}>
@@ -499,42 +402,19 @@ export default function BusinessPage() {
               </button>
             )}
             <button className="btn primary" disabled={!d.dirty || busy} onClick={() => save(kind)}>
-              {isTobe ? `${PLAN_LABEL[plan]}を保存` : "保存"}
+              保存
             </button>
-            {isTobe && dirtyPlans.length > 1 && (
-              <button className="btn primary" disabled={busy} onClick={saveAllPlans}>
-                未保存の{dirtyPlans.length}案をすべて保存
-              </button>
-            )}
           </div>
         </div>
         {isTobe && (
           <div className="ai-note">
             <div>
-              <strong>
-                {PLAN_LABEL[plan]}の案{d.data.summary ? `：${d.data.summary}` : `（${PLAN_DESC[plan]}）`}
-              </strong>
+              <strong>{d.data.summary ? `改善案：${d.data.summary}` : "改善後の目指す姿"}</strong>
               {!!d.data.needs?.length && <span>導入・準備が必要なもの：{d.data.needs.join("、")}</span>}
-              {isAdmin && (
-                <CostItemsEditor
-                  names={d.data.cost_items ?? []}
-                  table={costItems}
-                  onChange={(names) => edit(kind, { ...d.data, cost_items: names })}
-                />
-              )}
               <span className="muted small">
-                作業をクリックすると手直しできます。時間はAIの目安なので、確認してから保存してください。
-                {isAdmin && "費用対効果は「比較」タブに出ます。"}
+                作業をクリックすると手直しできます。確認してから保存してください。
               </span>
             </div>
-            <button
-              className={business.adopted_plan === plan ? "btn primary" : "btn ghost"}
-              disabled={!d.doc}
-              title={d.doc ? "業務一覧の削減時間に、この案を使います" : "保存すると採用できます"}
-              onClick={() => adopt(plan)}
-            >
-              {business.adopted_plan === plan ? "✓ 採用中（外す）" : "この案を採用"}
-            </button>
           </div>
         )}
         <FlowBoard
@@ -544,7 +424,7 @@ export default function BusinessPage() {
           kind={isTobe ? "tobe" : "asis"}
           base={isTobe ? drafts.asis?.data : undefined}
           exporting={exporting}
-          exportTitle={`${business.name}　${isTobe ? `TO-BE（改善後・${PLAN_LABEL[plan]}）` : "AS-IS（現状）"}`}
+          exportTitle={`${business.name}　${isTobe ? "TO-BE（改善後）" : "AS-IS（現状）"}`}
           exportSub={`${company.name}　｜　${new Date().toLocaleDateString("ja-JP")} 出力`}
           editable
           onChange={(f, merge) => edit(kind, f, merge)}
@@ -581,12 +461,6 @@ export default function BusinessPage() {
               ) : (
                 <dd>
                   {fmtMin(perCase.asis)}
-                  {perCase.tobe !== null && perCase.tobe !== perCase.asis && (
-                    <span className="biz-tobe" title={`TO-BE（改善後・${PLAN_LABEL[shownPlan]}）`}>
-                      {" → "}
-                      {fmtMin(perCase.tobe)}
-                    </span>
-                  )}
                 </dd>
               )}
             </div>
@@ -664,53 +538,72 @@ export default function BusinessPage() {
           </div>
         )}
         {tab === "asis" && (
-          <div className="split">
-            {renderFlowTab("asis")}
-            {(business.hearing_raw || business.hearing_notes) && drafts.asis && (
-              <details className="side-notes">
-                <summary>ヒアリングを見ながら入力</summary>
-                <pre>{business.hearing_raw || business.hearing_notes}</pre>
-              </details>
+          <div className="stack">
+            {versions.length > 0 && (
+              <div className="version-bar">
+                <label>
+                  <span className="version-label">AS-ISの版</span>
+                  <select value={viewing ?? ""} onChange={(e) => setViewing(e.target.value ? Number(e.target.value) : null)}>
+                    <option value="">いまのAS-IS{drafts.asis?.dirty ? "（未保存の変更あり）" : `（第${versions[versions.length - 1].number}版）`}</option>
+                    {[...versions].reverse().map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {versionLabel(v)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span className="muted small">保存するたびに、版が1つ残ります（全{versions.length}版）。過去の版を選ぶと、そのときのAS-ISを見られます。</span>
+              </div>
+            )}
+            {versions.length > 0 && (
+              <EffortBox
+                versions={versions}
+                monthlyCount={monthlyCountOf(business).count}
+                onSave={async (vid, value) => {
+                  try {
+                    await api.setSavedHours(vid, value);
+                    setVersions(await api.asisVersions(bid));
+                  } catch (e) {
+                    flash("err", e instanceof Error ? e.message : String(e));
+                  }
+                }}
+              />
+            )}
+            {viewed ? (
+              <VersionView
+                version={viewed}
+                current={drafts.asis?.data ?? null}
+                resources={resources}
+                onBack={() => setViewing(null)}
+                onRestore={() => {
+                  // いまのAS-ISを、この版の中身に置き換える（保存するまでは下書き。「元に戻す」で戻せる）
+                  edit("asis", normalize(viewed.data));
+                  setViewing(null);
+                  flash("ok", `第${viewed.number}版の中身を、いまのAS-ISに入れました。「保存」すると確定します（新しい版として残ります）`);
+                }}
+              />
+            ) : (
+              <div className="split">
+                {renderFlowTab("asis")}
+                {(business.hearing_raw || business.hearing_notes) && drafts.asis && (
+                  <details className="side-notes">
+                    <summary>ヒアリングを見ながら入力</summary>
+                    <pre>{business.hearing_raw || business.hearing_notes}</pre>
+                  </details>
+                )}
+              </div>
             )}
           </div>
         )}
-        {tab === "tobe" && (
-          <div className="stack">
-            {planPicker}
-            {renderFlowTab(tobeKind)}
-          </div>
-        )}
+        {tab === "tobe" && renderFlowTab("tobe")}
         {tab === "compare" &&
-          (drafts.asis && PLANS.some((p) => drafts[planKind(p)]) ? (
+          (drafts.asis && drafts.tobe ? (
             <div className="stack">
-              <PlanSummary
-                asisMinutes={perCase.asis ?? 0}
-                plans={PLANS.map((p) => ({ plan: p, flow: drafts[planKind(p)]?.data ?? null, saved: !!drafts[planKind(p)]?.doc }))}
-                adopted={business.adopted_plan}
-                onAdopt={adopt}
-                costItems={costItems}
-                hourlyWage={company.hourly_wage}
-                business={business}
-                companyId={company.id}
-                isAdmin={isAdmin}
-              />
-              {planPicker}
-              {drafts[tobeKind] ? (
-                <ComparisonView
-                  asis={drafts.asis.data}
-                  tobe={drafts[tobeKind].data}
-                  resources={resources}
-                  frequency={business.frequency}
-                />
-              ) : (
-                <div className="empty-state">
-                  <p>{PLAN_LABEL[plan]}の案はまだありません。TO-BEタブで作成できます。</p>
-                </div>
-              )}
+              <ComparisonView asis={drafts.asis.data} tobe={drafts.tobe.data} resources={resources} />
             </div>
           ) : (
             <div className="empty-state">
-              <p>AS-ISとTO-BE（梅・竹・松のどれか）を作成すると、比較が表示されます。</p>
+              <p>AS-ISとTO-BEを作成すると、比較が表示されます。</p>
             </div>
           ))}
       </section>
@@ -718,207 +611,178 @@ export default function BusinessPage() {
   );
 }
 
-/** 案の「お金のかかる導入物」を、単価表から選んで足す・外す（費用の計算に使う） */
-function CostItemsEditor({
-  names, table, onChange,
-}: { names: string[]; table: CostItem[]; onChange: (names: string[]) => void }) {
-  const [other, setOther] = useState("");
-  const known = new Set(table.map((c) => c.name));
-  const rest = table.filter((c) => !names.includes(c.name));
-  const add = (name: string) => {
-    const n = name.trim();
-    if (n && !names.includes(n)) onChange([...names, n]);
-  };
+/**
+ * 第1版からの削減工数（月あたり・時間）。AS-ISを直して保存するたびに、第1版とくらべてどれだけ減ったかが棒で伸びていく。
+ * 自動の値＝（第1版の作業時間 − その版の作業時間）× 月の件数。版ごとに、手で入力した値（実績など）に置き換えられる。
+ */
+function EffortBox({
+  versions, monthlyCount, onSave,
+}: { versions: AsisVersion[]; monthlyCount: number | null; onSave: (vid: number, value: number | null) => void }) {
+  const latest = versions[versions.length - 1];
   return (
-    <div className="cost-edit">
-      <span className="cost-edit-label">お金のかかる導入物：</span>
-      {names.length === 0 && <span className="muted">なし（費用0円）</span>}
-      {names.map((n) => (
-        <span key={n} className={known.has(n) ? "chip" : "chip unknown"} title={known.has(n) ? undefined : "単価表にないので、費用は「要見積もり」になります"}>
-          {n}
-          {!known.has(n) && <em>要見積もり</em>}
-          <button type="button" aria-label={`${n}を外す`} onClick={() => onChange(names.filter((x) => x !== n))}>
-            ×
-          </button>
+    <details className="effort-box">
+      <summary>
+        <span className="effort-title">第1版からの削減工数（月あたり）</span>
+        <strong className={latest.saved_hours != null && latest.saved_hours < 0 ? "minus" : ""}>{formatHours(latest.saved_hours)}</strong>
+        <span className="muted small">
+          第{latest.number}版の時点{latest.saved_hours_input != null ? "・入力した値" : ""}　クリックで、版ごとのグラフと入力欄を開きます
         </span>
-      ))}
-      {rest.length > 0 && (
-        <select
-          value=""
-          aria-label="単価表から足す"
-          onChange={(e) => {
-            add(e.target.value);
-            e.target.value = "";
-          }}
-        >
-          <option value="">＋ 単価表から足す</option>
-          {rest.map((c) => (
-            <option key={c.id} value={c.name}>
-              {c.name}（初期 {formatYen(c.initial_cost)}・月額 {formatYen(c.monthly_cost)}）
-            </option>
-          ))}
-        </select>
-      )}
-      <input
-        className="cost-other"
-        placeholder="単価表にないもの"
-        value={other}
-        aria-label="単価表にないものを足す"
-        onChange={(e) => setOther(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key !== "Enter") return;
-          e.preventDefault();
-          add(other);
-          setOther("");
-        }}
-      />
-    </div>
+      </summary>
+      <div className="stack">
+        {monthlyCount === null && (
+          <p className="regen">
+            月の件数が分からないので、自動では出せません。「業務情報を編集」で月の件数（または「日30件」のような頻度）を入れるか、下の表に削減工数を入力してください。
+          </p>
+        )}
+        <EffortChart
+          ariaLabel="AS-ISの版ごとの削減工数（第1版との比較）"
+          points={versions.map((v) => ({
+            key: v.id,
+            label: `第${v.number}版`,
+            value: v.saved_hours,
+            title: `第${v.number}版（${fmtSavedAt(v)}）：${formatHours(v.saved_hours)}／月`,
+          }))}
+        />
+        <div className="table-wrap">
+          <table className="plain effort-table">
+            <thead>
+              <tr>
+                <th>版</th>
+                <th>保存した日時</th>
+                <th className="num">1件あたりの時間</th>
+                <th className="num">自動の値（第1版との差 × 月の件数）</th>
+                <th className="num">入力した値（時間／月）</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...versions].reverse().map((v) => (
+                <tr key={v.id}>
+                  <td className="strong">第{v.number}版</td>
+                  <td className="small muted">
+                    {fmtSavedAt(v)}
+                    {v.saved_by ? `（${v.saved_by}）` : ""}
+                  </td>
+                  <td className="num">{fmtMin(v.minutes)}</td>
+                  <td className={`num${v.saved_hours_input != null ? " muted" : ""}`}>{formatHours(v.saved_hours_auto)}</td>
+                  <td className="num">
+                    <HoursInput key={`${v.id}:${v.saved_hours_input}`} value={v.saved_hours_input} label={`第${v.number}版の削減工数`} onSave={(x) => onSave(v.id, x)} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="muted small">
+          入力した値があれば、グラフと企業ページの合計にはその値を使います（実績が分かったときなど）。空にすると、自動の値に戻ります。
+          {monthlyCount !== null && `　月の件数：${monthlyCount.toLocaleString("ja-JP")}件`}
+        </p>
+      </div>
+    </details>
   );
 }
 
-/**
- * 梅・竹・松の3案を横に並べて見比べる表（比較タブの一番上）。
- * 削減時間は全員に、単価表による費用対効果（概算）は銀行担当者（isAdmin）にだけ出す。
- */
-function PlanSummary({
-  asisMinutes, plans, adopted, onAdopt, costItems, hourlyWage, business, companyId, isAdmin,
-}: {
-  asisMinutes: number;
-  plans: { plan: Plan; flow: Flow | null; saved: boolean }[];
-  adopted: Plan | "";
-  onAdopt: (p: Plan) => void;
-  costItems: CostItem[];
-  hourlyWage: number | null;
-  business: Business;
-  companyId: number;
-  isAdmin: boolean;
-}) {
-  const { count, from } = monthlyCountOf(business);
-  const dash = <span className="muted">—</span>;
+/** 削減工数の入力欄。入力して Enter か、欄の外をクリックすると保存する */
+function HoursInput({ value, label, onSave }: { value: number | null; label: string; onSave: (v: number | null) => void }) {
+  const [text, setText] = useState(value == null ? "" : String(value));
+  const t = text.trim().replace(/[,，]/g, "").replace(/^[−ー]/, "-");
+  const parsed = t === "" ? null : Number(t);
+  const invalid = parsed !== null && !Number.isFinite(parsed);
+  const commit = () => {
+    if (!invalid && parsed !== value) onSave(parsed);
+  };
+  return (
+    <input
+      className="hours-input"
+      inputMode="decimal"
+      placeholder="自動"
+      aria-label={label}
+      aria-invalid={invalid}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+      }}
+    />
+  );
+}
+
+/** 版の日時（2026/11/17 14:05） */
+function fmtSavedAt(v: AsisVersion): string {
+  if (!v.saved_at) return "";
+  const d = new Date(v.saved_at);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 版の選択肢の表示：第3版　2026/11/17 14:05（田中）★DX診断 2026/11/10 */
+function versionLabel(v: AsisVersion): string {
+  const used = v.diagnoses.map((d) => `${DIAGNOSIS_LABEL[d.kind]} ${d.date.replaceAll("-", "/")}`).join("・");
+  return `第${v.number}版　${fmtSavedAt(v)}${v.saved_by ? `（${v.saved_by}）` : ""}${used ? `　★${used}` : ""}`;
+}
+
+/** 過去のAS-ISの版（保存した時点の中身）を見る。書き換えはできない。いまのAS-ISとの違いも出す */
+function VersionView({
+  version, current, resources, onBack, onRestore,
+}: { version: AsisVersion; current: Flow | null; resources: Resource[]; onBack: () => void; onRestore: () => void }) {
+  const flow = normalize(version.data);
+  const stat = (f: Flow) => ({
+    minutes: f.steps.reduce((n, s) => n + (s.minutes || 0), 0),
+    issues: f.steps.filter((s) => s.issue).length,
+    ...counters(f, resources),
+  });
+  const then = stat(flow);
+  const now = current ? stat(current) : null;
+  const rows: [string, number, number | null, (n: number) => string][] = [
+    ["1件あたりの時間", then.minutes, now?.minutes ?? null, fmtMin],
+    ["詰まり（ボトルネック）", then.issues, now?.issues ?? null, (n) => `${n}件`],
+    ["手入力・転記", then.manual, now?.manual ?? null, (n) => `${n}回`],
+    ["メール連絡", then.mail, now?.mail ?? null, (n) => `${n}回`],
+    ["紙", then.paper, now?.paper ?? null, (n) => `${n}か所`],
+  ];
   return (
     <div className="stack">
-      <div className="table-wrap">
-        <table className="plain plan-summary">
-          <thead>
-            <tr>
-              <th>案</th>
-              <th>内容</th>
-              {isAdmin && <th>お金のかかる導入物</th>}
-              <th className="num">削減時間（1回）</th>
-              {isAdmin && (
-                <>
-                  <th className="num">初期費用</th>
-                  <th className="num">月額費用</th>
-                  <th className="num">月の削減額</th>
-                  <th className="num">月の効果</th>
-                  <th className="num">回収期間</th>
-                </>
-              )}
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {plans.map(({ plan, flow, saved }) => {
-              const minutes = flow ? flow.steps.reduce((n, st) => n + (st.minutes || 0), 0) : null;
-              const cut = minutes === null ? null : asisMinutes - minutes;
-              const cost = planCost(flow?.cost_items, costItems);
-              const eff = planEffect(cut, count, hourlyWage, cost);
-              const estimate = cost.unknown.length > 0;
-              return (
-                <tr key={plan} className={adopted === plan ? "adopted" : ""}>
-                  <td>
-                    <strong className={`plan-badge ${plan}`}>{PLAN_LABEL[plan]}</strong>
-                  </td>
-                  <td>
-                    {flow ? flow.summary || PLAN_DESC[plan] : <span className="muted">未作成（{PLAN_DESC[plan]}）</span>}
-                    {!!flow?.needs?.length && <div className="small muted">準備：{flow.needs.join("、")}</div>}
-                  </td>
-                  {isAdmin && (
-                    <td className="small">
-                      {!flow ? dash : cost.priced.length + cost.unknown.length === 0 ? (
-                        <span className="muted">なし</span>
-                      ) : (
-                        <>
-                          {cost.priced.map((c) => c.name).join("、")}
-                          {estimate && (
-                            <div className="estimate" title="単価表にないので、費用の合計には入っていません">
-                              要見積もり：{cost.unknown.join("、")}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </td>
-                  )}
-                  <td className="num">
-                    {cut === null ? dash : (
-                      <span className={cut < 0 ? "saved minus" : "saved"}>
-                        {cut < 0 ? "−" : ""}
-                        {fmtMin(Math.abs(cut))}
-                      </span>
-                    )}
-                  </td>
-                  {isAdmin && (
-                    <>
-                      <td className="num">{!flow ? dash : `${formatYen(cost.initial)}${estimate ? "＋要見積もり" : ""}`}</td>
-                      <td className="num">{!flow ? dash : `${formatYen(cost.monthly)}${estimate ? "＋要見積もり" : ""}`}</td>
-                      <td className="num">{eff.monthlySaving === null ? dash : formatYen(eff.monthlySaving)}</td>
-                      <td className="num">
-                        {eff.monthlyNet === null ? (
-                          estimate && eff.monthlySaving !== null ? <span className="estimate">要見積もり</span> : dash
-                        ) : (
-                          <span className={eff.monthlyNet < 0 ? "saved minus" : "saved"}>{formatYen(eff.monthlyNet)}</span>
-                        )}
-                      </td>
-                      <td className="num">
-                        {eff.paybackMonths === null ? (
-                          estimate && eff.monthlySaving !== null ? <span className="estimate">要見積もり</span> : dash
-                        ) : (
-                          formatPayback(eff.paybackMonths)
-                        )}
-                      </td>
-                    </>
-                  )}
-                  <td>
-                    {flow && (
-                      <button
-                        className={adopted === plan ? "btn primary" : "btn ghost"}
-                        disabled={!saved}
-                        title={saved ? "業務一覧の削減時間に、この案を使います" : "保存すると採用できます"}
-                        onClick={() => onAdopt(plan)}
-                      >
-                        {adopted === plan ? "✓ 採用中" : "採用"}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="version-note">
+        <div>
+          <strong>
+            第{version.number}版：{fmtSavedAt(version)} に保存したAS-IS{version.saved_by ? `（${version.saved_by}）` : ""}
+          </strong>
+          <span className="muted small">
+            過去の版です。書き換えはできません。
+            {version.diagnoses.length > 0 &&
+              `　この版を選んでいる診断の記録：${version.diagnoses.map((d) => `${d.date.replaceAll("-", "/")} ${DIAGNOSIS_LABEL[d.kind]}`).join("、")}`}
+          </span>
+        </div>
+        <div className="row gap">
+          <button
+            className="btn ghost"
+            title="いまのAS-ISを、この版の中身に置き換えます（保存するまでは下書きです）"
+            onClick={() => confirm(`いまのAS-ISを、第${version.number}版の中身に置き換えますか？（保存するまでは「元に戻す」で戻せます）`) && onRestore()}
+          >
+            この版の中身に戻す
+          </button>
+          <button className="btn primary" onClick={onBack}>
+            いまのAS-ISを見る
+          </button>
+        </div>
       </div>
-      {isAdmin && (
-        <p className="muted small cost-basis">
-          <strong>費用対効果は概算です。</strong>
-          月の削減額＝削減時間 × 月の件数 × 時給、月の効果＝月の削減額 − 月額費用、回収期間＝初期費用 ÷ 月の効果。 前提：月の件数{" "}
-          {count === null ? (
-            <b className="error-text">未設定（「業務情報を編集」で入力してください）</b>
-          ) : (
-            <b>
-              {count.toLocaleString("ja-JP")}件
-              {from === "frequency" && `（頻度「${business.frequency}」から換算。1か月${WORKDAYS_PER_MONTH}営業日）`}
-            </b>
-          )}
-          、時給{" "}
-          {hourlyWage == null ? (
-            <b className="error-text">
-              未設定（<Link href={`/companies/${companyId}`}>企業ページ</Link>で設定します）
-            </b>
-          ) : (
-            <b>{hourlyWage.toLocaleString("ja-JP")}円</b>
-          )}
-          、費用は<Link href="/settings/costs">単価表</Link>の金額の合計（単価表にないものは「要見積もり」で、合計に入りません）。
-        </p>
-      )}
+      <div className="version-diff">
+        {rows.map(([label, a, b, fmt]) => (
+          <div key={label}>
+            <span className="kpi-label">{label}</span>
+            <span className="version-val">
+              {fmt(a)}
+              {b !== null && (
+                <em className={b < a ? "better" : b > a ? "worse" : ""}>
+                  {" → いま "}
+                  {fmt(b)}
+                </em>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+      <FlowBoard flow={flow} resources={resources} kind="asis" />
     </div>
   );
 }
@@ -944,7 +808,7 @@ function BusinessInfoEditor({ business, onSaved }: { business: Business; onSaved
           <input value={f.frequency} onChange={(e) => setF({ ...f, frequency: e.target.value })} />
         </label>
         <label>
-          月の件数（費用対効果の計算用）
+          月の件数（月の削減時間の計算用）
           <input
             type="number"
             inputMode="numeric"

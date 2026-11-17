@@ -2,8 +2,8 @@
 
 import { authHeaders } from "./auth";
 import type {
-  Business, Company, Comparison, CostItem, Flow, FlowDoc, FlowKind, Me, Plan, Resource, ResourceKind, TobeKind, TobeSuggestion,
-  UserRow,
+  AsisVersion, Business, Company, Comparison, Diagnosis, DiagnosisIn, Effort, Flow, FlowDoc, FlowKind, Me,
+  Resource, ResourceKind, TobePlan, UserRow, VersionRef,
 } from "./types";
 
 export class ApiError extends Error {
@@ -38,7 +38,6 @@ async function call<T>(path: string, init?: { method?: string; body?: unknown; t
 }
 
 type CompanyIn = { name: string; industry: string; employees: number | null; note?: string; hourly_wage?: number | null };
-type CostItemIn = Pick<CostItem, "name" | "initial_cost" | "monthly_cost" | "note" | "sort">;
 type BusinessIn = Pick<Business, "name" | "department" | "frequency" | "description"> & { monthly_count?: number | null };
 type NotesIn = Partial<Pick<Business, "hearing_raw" | "hearing_notes" | "exec_view" | "field_view">>;
 
@@ -70,34 +69,36 @@ export const api = {
   /** ヒアリングボックスの記録を Azure OpenAI で決まった形式に整える（保存はしない） */
   formatHearing: (id: number, raw: string) =>
     call<{ text: string }>(`/api/businesses/${id}/hearing/format`, { body: { raw } }),
-  /** 保存済みのAS-ISから、Azure OpenAI で TO-BE の改善案を梅・竹・松の3つ作る（保存はしない） */
-  suggestTobe: (id: number) => call<TobeSuggestion>(`/api/businesses/${id}/tobe/suggest`, { body: {} }),
+  /** 保存済みのAS-ISから、Azure OpenAI で TO-BE の改善案を作る（保存はしない） */
+  suggestTobe: (id: number) => call<TobePlan>(`/api/businesses/${id}/tobe/suggest`, { body: {} }),
   deleteBusiness: (id: number) => call(`/api/businesses/${id}`, { method: "DELETE" }),
   setAssignees: (id: number, user_ids: number[]) =>
     call<Business>(`/api/businesses/${id}/assignees`, { method: "PUT", body: { user_ids } }),
 
   flows: (bid: number) =>
-    call<{
-      asis: FlowDoc | null;
-      /** 作成済みのTO-BEの案 */
-      plans: Partial<Record<Plan, FlowDoc>>;
-      comparisons: Partial<Record<Plan, Comparison>>;
-    }>(`/api/businesses/${bid}/flows`),
+    call<{ asis: FlowDoc | null; tobe: FlowDoc | null; comparison: Comparison | null }>(`/api/businesses/${bid}/flows`),
   saveFlow: (bid: number, kind: FlowKind, data: Flow, version: number) =>
     call<FlowDoc>(`/api/businesses/${bid}/flows/${kind}`, { method: "PUT", body: { data, version } }),
-  copyAsisToTobe: (bid: number, kind: TobeKind) =>
-    call<FlowDoc>(`/api/businesses/${bid}/flows/${kind}/copy-from-asis`, { body: {} }),
-  /** 採用する案を選ぶ（null で未選択に戻す） */
-  setAdopted: (bid: number, plan: Plan | null) =>
-    call<Business>(`/api/businesses/${bid}/adopted`, { method: "PUT", body: { plan } }),
+  copyAsisToTobe: (bid: number) => call<FlowDoc>(`/api/businesses/${bid}/flows/tobe/copy-from-asis`, { body: {} }),
+
+  /** 診断の記録（新しい順） */
+  diagnoses: (cid: number) => call<Diagnosis[]>(`/api/companies/${cid}/diagnoses`),
+  /** 診断を記録する（version_ids で、業務ごとに「そのときのAS-ISの版」を選ぶ） */
+  createDiagnosis: (cid: number, b: DiagnosisIn) => call<Diagnosis>(`/api/companies/${cid}/diagnoses`, { body: b }),
+  updateDiagnosis: (id: number, b: DiagnosisIn) => call<Diagnosis>(`/api/diagnoses/${id}`, { method: "PUT", body: b }),
+  deleteDiagnosis: (id: number) => call(`/api/diagnoses/${id}`, { method: "DELETE" }),
+  /** この業務のAS-ISの版（古い順。第1版が最初のAS-IS）。AS-ISを保存するたびに1つ増える */
+  asisVersions: (bid: number) => call<AsisVersion[]>(`/api/businesses/${bid}/versions`),
+  /** 企業の全業務の、AS-ISの版の見出し（診断を記録するときの選択肢） */
+  companyVersions: (cid: number) => call<VersionRef[]>(`/api/companies/${cid}/versions`),
+  /** 版ごとの削減工数（月あたり・時間）を手で入力する（null で入力を消して、自動の値に戻す） */
+  setSavedHours: (vid: number, value: number | null) =>
+    call<VersionRef>(`/api/versions/${vid}/saved-hours`, { method: "PUT", body: { value } }),
+  /** 企業の全業務の削減工数（月あたり・時間）と、月ごとの推移 */
+  companyEffort: (cid: number) => call<Effort>(`/api/companies/${cid}/effort`),
+
   drawio: (bid: number, kind: FlowKind) => call<string>(`/api/businesses/${bid}/flows/${kind}/drawio`, { text: true }),
   renderDrawio: (flow: Flow, title: string) => call<string>("/api/render/drawio", { body: { flow, title }, text: true }),
-
-  /** 単価表（全企業共通）。見るのは誰でも、編集は銀行担当者 */
-  costItems: () => call<CostItem[]>("/api/cost-items"),
-  createCostItem: (b: CostItemIn) => call<CostItem>("/api/cost-items", { body: b }),
-  updateCostItem: (id: number, b: CostItemIn) => call<CostItem>(`/api/cost-items/${id}`, { method: "PUT", body: b }),
-  deleteCostItem: (id: number) => call(`/api/cost-items/${id}`, { method: "DELETE" }),
 
   users: (cid: number) => call<UserRow[]>(`/api/companies/${cid}/users`),
   /** password は初期パスワード（AUTH_MODE=password のときは必須） */

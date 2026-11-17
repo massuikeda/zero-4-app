@@ -2,23 +2,33 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMe } from "@/components/AppShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DiagnosisHistory } from "@/components/DiagnosisHistory";
 import { formatEmployees } from "@/lib/company";
-import { formatMinutes } from "@/lib/flow";
 import { api } from "@/lib/api";
+import { formatHours } from "@/lib/diagnosis";
 import { type AuthMode, PASSWORD_MIN, getAuthMode } from "@/lib/auth";
-import { PLAN_LABEL, type Business, type Company, type Resource, type UserRow } from "@/lib/types";
+import type { Business, Company, Diagnosis, Effort, Resource, UserRow, VersionRef } from "@/lib/types";
 
-type Tab = "businesses" | "users";
+type Tab = "history" | "businesses" | "users";
 
 export default function CompanyPage() {
   const { id } = useParams<{ id: string }>();
   const cid = Number(id);
   const me = useMe();
   const isAdmin = me?.role === "admin";
-  const [tab, setTab] = useState<Tab>("businesses");
+  const [tab, setTab] = useState<Tab>("history");
+  /** 開いたときのタブを決めたか（読み直しのたびに変えない） */
+  const tabDecided = useRef(false);
+  const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
+  /** 全業務のAS-ISの版の見出し（診断を記録するときに選ぶ） */
+  const [versions, setVersions] = useState<VersionRef[]>([]);
+  /** 全業務の削減工数（月あたり・時間） */
+  const [effort, setEffort] = useState<Effort | null>(null);
+  /** 診断を記録する入力欄を開いているか */
+  const [formOpen, setFormOpen] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
@@ -36,10 +46,21 @@ export default function CompanyPage() {
 
   const load = useCallback(async () => {
     await guard(async () => {
-      const [c, b, r] = await Promise.all([api.company(cid), api.businesses(cid), api.resources(cid)]);
+      const [c, b, r, d, v, e] = await Promise.all([
+        api.company(cid), api.businesses(cid), api.resources(cid), api.diagnoses(cid), api.companyVersions(cid),
+        api.companyEffort(cid),
+      ]);
+      setVersions(v);
+      setEffort(e);
       setCompany(c);
       setBusinesses(b);
       setResources(r);
+      setDiagnoses(d);
+      // 開いたときのタブ：診断の記録があれば履歴、まだなければ業務フロー（先に業務とAS-ISを作るため）
+      if (!tabDecided.current) {
+        tabDecided.current = true;
+        setTab(d.length ? "history" : "businesses");
+      }
       if (isAdmin) setUsers(await api.users(cid));
     });
   }, [cid, isAdmin]);
@@ -55,32 +76,45 @@ export default function CompanyPage() {
       {isAdmin && (
         <Breadcrumbs items={[{ label: "企業一覧", href: "/" }, { label: company.name }]} />
       )}
-      <div className="title-row">
-        <div>
-          <h1>{company.name}</h1>
-          <p className="muted small">
-            {[company.industry, company.employees != null ? `従業員 ${formatEmployees(company.employees)}` : "", company.note]
-              .filter(Boolean)
-              .join("・")}
-          </p>
+      <div className="card company-head">
+        <div className="title-row">
+          <div>
+            <h1>{company.name}</h1>
+            <p className="company-facts">
+              {[company.industry, company.employees != null ? `従業員 ${formatEmployees(company.employees)}` : ""].filter(Boolean).join("　")}
+            </p>
+          </div>
         </div>
-        <WageEditor company={company} isAdmin={isAdmin} onSaved={setCompany} guard={guard} />
       </div>
       {error && <div className="alert">{error}</div>}
 
-      {isAdmin && (
-        <div className="tabs">
-          {(
-            [
-              ["businesses", `業務一覧（${businesses.length}）`],
-              ["users", `企業ユーザー（${users.length}）`],
-            ] as const
-          ).map(([k, label]) => (
-            <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>
-              {label}
-            </button>
-          ))}
-        </div>
+      <div className="tabs">
+        {(
+          [
+            ["history", "診断・ヒアリングの履歴"],
+            ["businesses", `業務フロー（${businesses.length}）`],
+            ...(isAdmin ? ([["users", `企業ユーザー（${users.length}）`]] as const) : []),
+          ] as const
+        ).map(([k, label]) => (
+          <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "history" && (
+        <DiagnosisHistory
+          cid={cid}
+          isAdmin={isAdmin}
+          diagnoses={diagnoses}
+          businesses={businesses}
+          versions={versions}
+          effort={effort}
+          onChange={load}
+          guard={guard}
+          formOpen={formOpen}
+          setFormOpen={setFormOpen}
+        />
       )}
 
       {tab === "businesses" && (
@@ -88,6 +122,7 @@ export default function CompanyPage() {
           cid={cid}
           isAdmin={isAdmin}
           businesses={businesses}
+          effort={effort}
           resources={resources}
           onChange={load}
           guard={guard}
@@ -98,59 +133,18 @@ export default function CompanyPage() {
   );
 }
 
-/** 時給（企業ごとに1つ）。TO-BEの削減時間を金額に直すのに使う。設定は銀行担当者 */
-function WageEditor({
-  company, isAdmin, onSaved, guard,
-}: { company: Company; isAdmin: boolean; onSaved: (c: Company) => void; guard: Guard }) {
-  const [value, setValue] = useState(company.hourly_wage == null ? "" : String(company.hourly_wage));
-  const t = value.trim().replace(/[,，]/g, "");
-  const wage = t === "" ? null : /^\d+$/.test(t) ? Number(t) : undefined; // undefined＝入力ミス
-  const changed = wage !== undefined && wage !== company.hourly_wage;
-  if (!isAdmin) return null; // 費用対効果は銀行担当者だけが扱う
-  return (
-    <form
-      className="wage-edit"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!changed) return;
-        guard(async () =>
-          onSaved(
-            await api.updateCompany(company.id, {
-              name: company.name, industry: company.industry, employees: company.employees, note: company.note, hourly_wage: wage,
-            }),
-          ),
-        );
-      }}
-    >
-      <label>
-        <span className="small muted">時給（円）</span>
-        <input
-          inputMode="numeric"
-          placeholder="例：2500"
-          value={value}
-          aria-invalid={wage === undefined}
-          title="TO-BEの削減時間を金額（月の削減額）に直すのに使います"
-          onChange={(e) => setValue(e.target.value)}
-        />
-      </label>
-      <button type="submit" className="btn ghost" disabled={!changed}>
-        保存
-      </button>
-      {wage === undefined && <span className="small error-text">0以上の整数で入力してください</span>}
-    </form>
-  );
-}
-
 type Guard = (fn: () => Promise<unknown>) => Promise<void>;
 
 function BusinessList({
-  cid, isAdmin, businesses, resources, onChange, guard,
+  cid, isAdmin, businesses, effort, resources, onChange, guard,
 }: {
-  cid: number; isAdmin: boolean; businesses: Business[]; resources: Resource[];
+  cid: number; isAdmin: boolean; businesses: Business[]; effort: Effort | null; resources: Resource[];
   onChange: () => void; guard: Guard;
 }) {
   const [form, setForm] = useState({ name: "", department: "", frequency: "" });
   const [query, setQuery] = useState("");
+  // 業務ごとの、第1版からの削減時間（月あたり・時間）。企業ページの右側の合計と同じ値
+  const savedOf = new Map((effort?.businesses ?? []).map((e) => [e.business_id, e.saved_hours]));
   const depts = resources.filter((r) => r.kind === "部署").map((r) => r.name);
   const shown = businesses.filter((b) => `${b.name}${b.department}`.includes(query));
 
@@ -168,7 +162,8 @@ function BusinessList({
               <th>部署</th>
               <th>頻度</th>
               <th>状況</th>
-              <th className="num">削減時間（1回あたり）</th>
+              <th className="num">第1版からの削減時間（月あたり）</th>
+              <th className="num">AS-ISの版</th>
               <th>更新日</th>
               {isAdmin && <th />}
             </tr>
@@ -187,21 +182,13 @@ function BusinessList({
                   <span className={`status s${["未着手", "AS-IS作成済", "TO-BE作成済"].indexOf(b.status)}`}>{b.status}</span>
                 </td>
                 <td className="num">
-                  {b.saved_minutes == null ? (
+                  {savedOf.get(b.id) == null ? (
                     <span className="muted">—</span>
                   ) : (
-                    <span className={b.saved_minutes < 0 ? "saved minus" : "saved"}>
-                      {b.saved_minutes < 0 ? "−" : ""}
-                      {formatMinutes(Math.abs(b.saved_minutes))}
-                      {b.saved_plan && (
-                        <em className="plan-of" title={b.adopted_plan ? "採用する案" : "採用する案が未選択のため、竹の案を表示しています"}>
-                          {PLAN_LABEL[b.saved_plan]}
-                          {b.adopted_plan ? "・採用" : ""}
-                        </em>
-                      )}
-                    </span>
+                    <span className={savedOf.get(b.id)! < 0 ? "saved minus" : "saved"}>{formatHours(savedOf.get(b.id))}</span>
                   )}
                 </td>
+                <td className="num">{b.asis_versions ? `${b.asis_versions}版` : <span className="muted">—</span>}</td>
                 <td className="small muted">{new Date(b.updated_at).toLocaleDateString("ja-JP")}</td>
                 {isAdmin && (
                   <td>
@@ -221,7 +208,7 @@ function BusinessList({
             ))}
             {shown.length === 0 && (
               <tr>
-                <td colSpan={7} className="muted center">
+                <td colSpan={8} className="muted center">
                   {isAdmin ? "業務がまだありません" : "業務はまだ登録されていません。銀行の担当者にお問い合わせください"}
                 </td>
               </tr>
@@ -343,7 +330,7 @@ function CompanyUserManager({
                           保存
                         </button>
                         <button type="button" className="btn ghost" onClick={() => setReset(null)}>
-                          やめる
+                          キャンセル
                         </button>
                       </form>
                     ) : (

@@ -7,19 +7,9 @@ export const MEDIA = ["FAX", "メール", "電話", "配達", "郵送", "手渡�
 export type StepType = (typeof STEP_TYPES)[number];
 export type ChangeAction = (typeof CHANGE_ACTIONS)[number];
 export type ResourceKind = (typeof RESOURCE_KINDS)[number];
-/** TO-BE は松竹梅の3案（梅＝やり方の見直しだけ／竹＝手ごろなツールの導入／松＝RPA・システム連携で自動化） */
-export const PLANS = ["ume", "take", "matsu"] as const;
-export type Plan = (typeof PLANS)[number];
-export const PLAN_LABEL: Record<Plan, string> = { ume: "梅", take: "竹", matsu: "松" };
-export const PLAN_DESC: Record<Plan, string> = {
-  ume: "お金をかけず、やり方だけを見直す",
-  take: "手ごろなツールやクラウドサービスを入れる",
-  matsu: "RPAやシステム連携で自動化する",
-};
-export type TobeKind = `tobe_${Plan}`;
-export type FlowKind = "asis" | TobeKind;
-export const planKind = (plan: Plan): TobeKind => `tobe_${plan}`;
-export const FLOW_KINDS: FlowKind[] = ["asis", ...PLANS.map(planKind)];
+/** 図は AS-IS（現状）と TO-BE（改善後）の2つ。TO-BE は1つだけ（RPA・システム連携まで含めた改善後の姿） */
+export type FlowKind = "asis" | "tobe";
+export const FLOW_KINDS: FlowKind[] = ["asis", "tobe"];
 
 export const CHANGE_COLORS: Record<ChangeAction, string> = {
   排除: "#9E9E9E",
@@ -65,8 +55,6 @@ export interface Flow {
   summary?: string;
   /** TO-BEの案で、導入・準備が必要なもの */
   needs?: string[];
-  /** TO-BEの案で、お金のかかる導入物（単価表の名前。単価表にない名前は「要見積もり」になる） */
-  cost_items?: string[];
   /** TO-BEの案で、なくした作業（排除）の理由。作業ID → 理由 */
   removed_notes?: Record<string, string>;
 }
@@ -149,16 +137,13 @@ export interface Business {
   exec_view: string;
   field_view: string;
   updated_at: string;
-  /** 月の件数（費用対効果の計算に使う）。空なら頻度の文字から換算する */
+  /** 月の件数（月の削減時間・削減工数の計算に使う）。空なら頻度の文字から換算する */
   monthly_count: number | null;
   status: "未着手" | "AS-IS作成済" | "TO-BE作成済";
-  /** 採用する案（未選択は空） */
-  adopted_plan: Plan | "";
-  /** 案ごとの削減時間（1回あたり・分）。作成済みの案だけ入る */
-  saved_by_plan: Partial<Record<Plan, number>>;
-  /** 一覧に出す削減時間：採用する案のもの。未選択なら竹。その案がまだなければ null */
-  saved_plan: Plan | null;
+  /** 削減時間（1回あたり・分）＝AS-ISの合計時間 − TO-BEの合計時間。TO-BEがまだなければ null */
   saved_minutes: number | null;
+  /** 残してあるAS-ISの版の数（保存した回数） */
+  asis_versions: number;
   assignee_ids: number[];
 }
 
@@ -179,24 +164,105 @@ export interface TobeChange {
 export interface TobePlan {
   summary: string;
   needs: string[];
-  /** お金のかかる導入物（単価表の名前。ないものは要見積もり） */
-  cost_items: string[];
   changes: TobeChange[];
 }
 
-/** AIが出したTO-BEの改善案（出せた案だけ入る） */
-export interface TobeSuggestion {
-  plans: Partial<Record<Plan, TobePlan>>;
+// ---------------- AS-ISの版と、診断の記録（履歴） ----------------
+export const DIAGNOSIS_KINDS = ["annual", "proposal"] as const;
+export type DiagnosisKind = (typeof DIAGNOSIS_KINDS)[number];
+export const DIAGNOSIS_LABEL: Record<DiagnosisKind, string> = { annual: "DX診断", proposal: "改善提案" };
+
+/** 経営者の見立てと現場の実態のずれ（1件） */
+export interface Gap {
+  /** 経営者の見立て */
+  exec: string;
+  /** 現場の実態 */
+  field: string;
 }
 
-/** 単価表（全企業共通）の1件。TO-BEの案で導入するものの、初期費用と月額の目安 */
-export interface CostItem {
-  id: number;
-  name: string;
-  /** 初期費用（円） */
-  initial_cost: number;
-  /** 月額（円） */
-  monthly_cost: number;
-  note: string;
-  sort: number;
+/** AS-ISから数えたもの（診断の記録では、選んだ版の合計） */
+export interface Metrics {
+  businesses: number;
+  steps: number;
+  minutes: number;
+  /** 詰まり（ボトルネック）の数 */
+  issues: number;
+  /** 手入力・転記の箇所 */
+  manual: number;
+  /** 紙の工程 */
+  paper: number;
+  /** メール連絡 */
+  mail: number;
+  /** 経営者の見立てと現場の実態のずれ */
+  gaps: number;
 }
+
+/** AS-ISの版の見出し（中身なし）。AS-ISを保存するたびに1つ残る */
+export interface VersionRef {
+  id: number;
+  business_id: number;
+  /** 第何版か（業務ごとに、古い順に1,2,3…） */
+  number: number;
+  saved_at: string | null;
+  saved_by: string;
+  /** 作業時間の合計（1回あたり・分） */
+  minutes: number;
+  /** 削減工数（月あたり・時間）を手で入力した値。なければ null */
+  saved_hours_input: number | null;
+  /** 自動の値＝（第1版の時間 − この版の時間）× 月の件数。月の件数が分からなければ null */
+  saved_hours_auto: number | null;
+  /** 使う値（入力があれば入力、なければ自動） */
+  saved_hours: number | null;
+}
+
+/** 企業の全業務の削減工数（月あたり・時間。AS-ISの第1版とくらべて） */
+export interface Effort {
+  /** 全業務の合計（出せる業務が1つもなければ null） */
+  total_hours: number | null;
+  /** 全業務の、いまの作業時間の合計（月あたり・時間） */
+  current_hours: number | null;
+  businesses: {
+    business_id: number;
+    name: string;
+    versions: number;
+    first_minutes: number;
+    latest_minutes: number;
+    monthly_count: number | null;
+    saved_hours: number | null;
+    /** いまの作業時間（月あたり・時間）＝いちばん新しい版の作業時間 × 月の件数 */
+    current_hours: number | null;
+  }[];
+  /** 月ごとの推移（その月の終わりの時点の値） */
+  months: { month: string; hours: number }[];
+}
+
+/** ある業務の、AS-ISの版（保存した時点の中身） */
+export interface AsisVersion extends VersionRef {
+  data: Flow;
+  metrics: Metrics;
+  /** この版を選んでいる診断の記録 */
+  diagnoses: { id: number; date: string; kind: DiagnosisKind }[];
+}
+
+/** 診断の記録（企業ごとの履歴の1件）。業務ごとに「そのときのAS-ISの版」を選んで残す */
+export interface Diagnosis {
+  id: number;
+  company_id: number;
+  /** 実施日（2026-11-10 の形） */
+  date: string;
+  kind: DiagnosisKind;
+  participants: string;
+  staff: string;
+  note: string;
+  gaps: Gap[];
+  created_by: string;
+  metrics: Metrics;
+  /** 選んだAS-ISの版（業務ごと）。saved_hours は、その版の削減工数（月あたり・時間。第1版とくらべて） */
+  versions: { business_id: number; business_name: string; version_id: number; number: number; saved_hours: number | null }[];
+  /** 選んだ版の削減工数の合計（月あたり・時間）。出せる業務が1つもなければ null */
+  saved_hours: number | null;
+}
+export type DiagnosisIn = Pick<Diagnosis, "date" | "kind" | "participants" | "staff" | "note" | "gaps"> & {
+  /** 選んだAS-ISの版（1つの業務につき1つまで） */
+  version_ids: number[];
+};

@@ -1,7 +1,7 @@
 """業務フローの「決まったフォーマット」と API の入出力。"""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,15 +11,8 @@ StepType = Literal["作業", "判断", "システム処理", "帳票", "待ち"]
 # TO-BE の変更区分（ECRS + 自動化 + 新規）
 ChangeAction = Literal["排除", "統合", "入替", "簡素化", "自動化", "新規"]
 ResourceKind = Literal["部署", "担当者", "取引先", "システム", "帳票"]
-# TO-BE は松竹梅の3案（梅＝やり方の見直しだけ／竹＝手ごろなツールの導入／松＝RPA・システム連携で自動化）
-Plan = Literal["ume", "take", "matsu"]
-PLANS: tuple[str, ...] = ("ume", "take", "matsu")
-FlowKind = Literal["asis", "tobe_ume", "tobe_take", "tobe_matsu"]
-
-
-def plan_kind(plan: str) -> str:
-    """案（ume/take/matsu）→ flows.kind の値（tobe_ume など）"""
-    return f"tobe_{plan}"
+# 図は AS-IS（現状）と TO-BE（改善後）の2つ。TO-BE は1つだけ（RPA・システム連携まで含めた改善後の姿）
+FlowKind = Literal["asis", "tobe"]
 
 
 # ---------- フローのフォーマット ----------
@@ -52,8 +45,6 @@ class Flow(BaseModel):
     # TO-BEの案の説明（AS-ISでは使わない）
     summary: str = Field("", max_length=300)                 # この案の要約
     needs: list[str] = Field(default_factory=list, max_length=10)  # 導入・準備が必要なもの
-    # お金のかかる導入物（単価表の名前。単価表にない名前は、画面で「要見積もり」になる）
-    cost_items: list[str] = Field(default_factory=list, max_length=20)
     # なくした作業（排除）の理由。作業ID → 何を使って、どうなくすか（図から消える作業なので、ここに残す）
     removed_notes: dict[str, str] = Field(default_factory=dict)
 
@@ -134,12 +125,9 @@ class BusinessOut(_Out):
     updated_at: datetime
     monthly_count: Optional[int] = None  # 月の件数（空なら、画面が頻度の文字から換算する）
     status: str = "未着手"
-    adopted_plan: str = ""  # 採用する案（ume / take / matsu。未選択は空）
-    # 削減時間（1回あたり・分）＝ AS-ISの合計時間 − TO-BEの合計時間。案ごと（作成済みの案だけ入る）
-    saved_by_plan: dict[str, int] = {}
-    # 一覧に出す削減時間：採用する案のもの。未選択なら竹。その案がまだなければ None
-    saved_plan: Optional[str] = None
+    # 削減時間（1回あたり・分）＝ AS-ISの合計時間 − TO-BEの合計時間。TO-BEがまだなければ None
     saved_minutes: Optional[int] = None
+    asis_versions: int = 0  # 残してあるAS-ISの版の数（保存した回数）
     assignee_ids: list[int] = []
 
 
@@ -153,8 +141,8 @@ class FlowDocOut(BaseModel):
 
 class FlowsOut(BaseModel):
     asis: Optional[FlowDocOut]
-    plans: dict[str, FlowDocOut]          # 作成済みのTO-BEの案（ume / take / matsu）
-    comparisons: dict[str, Comparison]    # 案ごとの、AS-ISとの比較
+    tobe: Optional[FlowDocOut]
+    comparison: Optional[Comparison]  # AS-ISとTO-BEの比較（両方あるときだけ）
 
 
 # ---------- 入力 ----------
@@ -246,34 +234,126 @@ class TobeChange(BaseModel):
 class TobePlanOut(BaseModel):
     summary: str = ""             # この案の要約
     needs: list[str] = []         # 導入・準備が必要なもの
-    cost_items: list[str] = []    # お金のかかる導入物（単価表の名前。ないものは要見積もり）
     changes: list[TobeChange]
 
 
-class TobeSuggestOut(BaseModel):
-    plans: dict[str, TobePlanOut]  # ume / take / matsu（AIが出せた案だけ入る）
+# ---------- AS-ISの版と、診断の記録（履歴） ----------
+DiagnosisKind = Literal["annual", "proposal"]  # 年次DX診断 / 改善提案
 
 
-class AdoptIn(BaseModel):
-    plan: Optional[Plan] = None   # 採用する案。None で未選択に戻す
+class Gap(BaseModel):
+    """経営者の見立てと現場の実態のずれ（1件）"""
+
+    exec: str = Field("", max_length=300)   # 経営者の見立て
+    field: str = Field("", max_length=300)  # 現場の実態
 
 
-# ---------- 単価表 ----------
-class CostItemOut(_Out):
+class DiagnosisIn(BaseModel):
+    date: date
+    kind: DiagnosisKind = "annual"
+    participants: str = Field("", max_length=300)
+    staff: str = Field("", max_length=200)
+    note: str = Field("", max_length=5000)
+    gaps: list[Gap] = Field(default_factory=list, max_length=30)
+    # そのときのAS-ISの版（flow_versions.id）。1つの業務につき1つまで。
+    # 省略（None）：新しく記録するときは各業務のいちばん新しい版、直すときは今のまま
+    version_ids: Optional[list[int]] = Field(None, max_length=500)
+
+
+class Metrics(BaseModel):
+    """AS-ISから数えたもの（診断の記録では、選んだ版の合計）"""
+
+    businesses: int = 0  # AS-ISのある業務の数
+    steps: int = 0       # 作業の数
+    minutes: int = 0     # 作業時間の合計（各業務1回あたり）
+    issues: int = 0      # 詰まり（ボトルネック）の数
+    manual: int = 0      # 手入力・転記の箇所
+    paper: int = 0       # 紙の工程
+    mail: int = 0        # メール連絡
+    gaps: int = 0        # 経営者の見立てと現場の実態のずれ
+
+
+class DiagnosisVersion(BaseModel):
+    """診断の記録で選んだ、ある業務のAS-ISの版"""
+
+    business_id: int
+    business_name: str
+    version_id: int
+    number: int  # 第何版か
+    saved_hours: Optional[float] = None  # その版の削減工数（月あたり・時間。第1版とくらべて）。出せなければ None
+
+
+class DiagnosisOut(BaseModel):
     id: int
-    name: str
-    initial_cost: int
-    monthly_cost: int
+    company_id: int
+    date: date
+    kind: str
+    participants: str
+    staff: str
     note: str
-    sort: int
+    gaps: list[Gap]
+    created_by: str
+    metrics: Metrics
+    versions: list[DiagnosisVersion] = []  # 選んだAS-ISの版（業務ごと）
+    saved_hours: Optional[float] = None    # 選んだ版の削減工数の合計（月あたり・時間）。出せる業務が1つもなければ None
 
 
-class CostItemIn(BaseModel):
-    name: str = Field(..., min_length=1, max_length=60)
-    initial_cost: int = Field(0, ge=0, le=1_000_000_000)   # 初期費用（円）
-    monthly_cost: int = Field(0, ge=0, le=1_000_000_000)   # 月額（円）
-    note: str = Field("", max_length=200)
-    sort: int = 0
+class DiagnosisRef(BaseModel):
+    id: int
+    date: date
+    kind: str
+
+
+class VersionRef(BaseModel):
+    """AS-ISの版の見出し（中身なし）。診断を記録するときの選択肢に使う"""
+
+    id: int
+    business_id: int
+    number: int
+    saved_at: Optional[datetime]
+    saved_by: str
+    minutes: int = 0  # 作業時間の合計（1回あたり・分）
+    # 削減工数（月あたり・時間）。第1版とくらべて、どれだけ減ったか
+    saved_hours_input: Optional[float] = None  # 手で入力した値（なければ None）
+    saved_hours_auto: Optional[float] = None   # 自動の値＝（第1版の時間 − この版の時間）× 月の件数。月の件数が分からなければ None
+    saved_hours: Optional[float] = None        # 使う値（入力があれば入力、なければ自動）
+
+
+class SavedHoursIn(BaseModel):
+    value: Optional[float] = Field(None, ge=-1e9, le=1e9)  # None で、入力を消して自動の値に戻す
+
+
+class EffortBusiness(BaseModel):
+    business_id: int
+    name: str
+    versions: int                 # 版の数
+    first_minutes: int            # 第1版の作業時間（1回あたり・分）
+    latest_minutes: int           # いちばん新しい版の作業時間
+    monthly_count: Optional[int]  # 月の件数（分からなければ None）
+    saved_hours: Optional[float]  # いちばん新しい版の削減工数（月あたり・時間）
+    current_hours: Optional[float] = None  # いまの作業時間（月あたり・時間）＝いちばん新しい版の作業時間 × 月の件数
+
+
+class EffortMonth(BaseModel):
+    month: str    # 2026-11
+    hours: float  # その月の終わりの時点の、全業務の削減工数（月あたり・時間）
+
+
+class EffortOut(BaseModel):
+    """企業の全業務の削減工数（月あたり・時間。AS-ISの第1版とくらべて）"""
+
+    total_hours: Optional[float]  # 全業務の合計（出せる業務が1つもなければ None）
+    current_hours: Optional[float] = None  # 全業務の、いまの作業時間の合計（月あたり・時間）
+    businesses: list[EffortBusiness]
+    months: list[EffortMonth]     # 月ごとの推移（最初の版を保存した月から今月まで。長くても直近24か月）
+
+
+class AsisVersionOut(VersionRef):
+    """ある業務の、AS-ISの版（保存した時点の中身）"""
+
+    data: Flow
+    metrics: Metrics
+    diagnoses: list[DiagnosisRef] = []  # この版を選んでいる診断の記録
 
 
 class AssignIn(BaseModel):

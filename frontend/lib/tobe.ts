@@ -22,13 +22,12 @@ export function applyTobeChanges(
   changes: TobeChange[],
   resources: Resource[] = [],
   /** この案の説明（図と一緒に保存する） */
-  info: { summary?: string; needs?: string[]; cost_items?: string[] } = {},
+  info: { summary?: string; needs?: string[] } = {},
 ): TobeResult {
   // AS-ISをコピー（「AS-ISをコピーして作成」と同じく、変更区分と補足は空から始める）
   let flow: Flow = normalize({
     summary: info.summary ?? "",
     needs: info.needs ?? [],
-    cost_items: info.cost_items ?? [],
     lanes: [...asis.lanes],
     steps: asis.steps.map((s) => ({ ...s, change: null, note: "", next: [...s.next], next_media: [...s.next_media] })),
   });

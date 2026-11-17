@@ -7,7 +7,11 @@ erDiagram
     companies ||--o{ resources : "持つ"
     companies ||--o{ businesses : "持つ"
     companies |o--o{ users : "所属（管理者は所属なし）"
-    businesses ||--o{ flows : "AS-IS と TO-BE 3案（最大4件）"
+    businesses ||--o{ flows : "AS-IS と TO-BE（各1件）"
+    companies ||--o{ diagnoses : "診断の記録"
+    businesses ||--o{ flow_versions : "AS-ISの版（保存のたびに1つ）"
+    diagnoses ||--o{ diagnosis_flows : "そのとき選んだ版"
+    flow_versions ||--o{ diagnosis_flows : "選ばれた版"
     businesses ||--o{ assignments : "割り当て"
     users ||--o{ assignments : "割り当て"
 
@@ -16,9 +20,36 @@ erDiagram
         string name "企業名"
         string industry "業種"
         int employees "従業員数（未入力は空）"
-        int hourly_wage "時給（円）。費用対効果の計算用"
+        int hourly_wage "時給（円）。月の削減額の計算用"
         text note "メモ"
         datetime created_at "作成日時"
+    }
+    diagnoses {
+        int id PK
+        int company_id FK "企業"
+        date date "実施日"
+        string kind "annual（DX診断）・proposal（改善提案）"
+        string participants "参加者"
+        string staff "銀行側の担当"
+        text note "内容"
+        json gaps "（今は使っていない）経営者の見立てと現場の実態のずれ"
+        string created_by "記録した人"
+        datetime created_at "作成日時"
+    }
+    flow_versions {
+        int id PK
+        int business_id FK "業務（numberと組で一意）"
+        int number "第何版か（業務ごとに1,2,3…）"
+        json data "保存した時点のAS-IS（flows.data と同じ形）"
+        datetime saved_at "保存した日時"
+        string saved_by "保存した人"
+        float saved_hours "削減工数（月あたり・時間）を手で入力した値。空なら自動"
+    }
+    diagnosis_flows {
+        int id PK
+        int diagnosis_id FK "診断の記録（business_idと組で一意）"
+        int business_id FK "業務"
+        int version_id FK "選んだAS-ISの版"
     }
     resources {
         int id PK
@@ -34,6 +65,9 @@ erDiagram
         string name "名前"
         string role "admin（管理者）・member（担当者）"
         int company_id FK "所属企業（管理者は空）"
+        string password_hash "パスワード（元に戻せない形）"
+        int failed_logins "続けて間違えた回数"
+        datetime locked_until "この時刻までロック"
     }
     businesses {
         int id PK
@@ -46,26 +80,18 @@ erDiagram
         text hearing_notes "AIが整えたテキスト（AS-ISの元）"
         text exec_view "経営者の認識"
         text field_view "現場の実態"
-        string adopted_plan "採用するTO-BEの案（ume・take・matsu。未選択は空）"
+        string adopted_plan "（今は使っていない）3案だったころの、採用する案"
         int monthly_count "月の件数（空なら頻度から換算）"
         datetime updated_at "更新日時"
     }
     flows {
         int id PK
         int business_id FK "業務（kindと組で一意）"
-        string kind "asis・tobe_ume・tobe_take・tobe_matsu"
+        string kind "asis・tobe_matsu（TO-BE）"
         json data "図の中身（列・作業・矢印）"
         int version "同時編集の上書き防止"
         datetime updated_at "更新日時"
         string updated_by "更新した人"
-    }
-    cost_items {
-        int id PK
-        string name UK "名前（RPA・OCR など）"
-        int initial_cost "初期費用（円）"
-        int monthly_cost "月額（円）"
-        string note "メモ"
-        int sort "並び順"
     }
     assignments {
         int user_id PK,FK "担当者"
@@ -81,16 +107,20 @@ erDiagram
 | resources | **今は使っていません。** 以前は図の候補（部署・担当者・取引先・システム・帳票）を手で登録していました。今は、その企業の図に出てきた担当と道具を、そのまま候補にしています（テーブルとデータは残してあります） |
 | users | ログインする人。管理者（admin）は企業に所属しない。担当者（member）はどこか1社に所属 |
 | businesses | 業務。ヒアリングメモ・経営者の認識・現場の実態もここに入る |
-| flows | 業務フロー本体。1つの業務に AS-IS が1件と、TO-BE が梅・竹・松の3案（各最大1件）。business_id と kind の組で一意 |
-| cost_items | 単価表（全企業共通）。TO-BEの案で導入するものの、初期費用と月額の目安。銀行担当者だけが見られる・編集できる。ほかのテーブルとはつながっていない（案の側は、名前で参照する） |
+| flows | 業務フロー本体（いまの状態）。1つの業務に AS-IS が1件と、TO-BE が1件。business_id と kind の組で一意 |
+| diagnoses | 診断の記録（DX診断・改善提案）。企業ごとの履歴 |
+| flow_versions | AS-ISの版。AS-ISを保存するたびに、その時点の中身が1行増える（あとから書き換えない）。過去のAS-ISをさかのぼるのに使う |
+| diagnosis_flows | 診断の記録と、そのとき選んだAS-ISの版の結び付き（1つの記録で、1つの業務につき1つ）。年ごとの比較のもとになる |
 | assignments | どの担当者がどの業務を見られる・編集できるか（多対多） |
 
-- 削除のルール：企業を消すと、その企業のリソース・業務・担当者・フロー・割り当てもまとめて消えます（ON DELETE CASCADE）
+- 削除のルール：企業を消すと、その企業のリソース・業務・担当者・フロー・割り当て・AS-ISの版・診断の記録もまとめて消えます（ON DELETE CASCADE）。診断の記録を消しても、AS-ISの版は消えません（版との結び付きだけが消えます）
 - `flows.version` は保存のたびに1増え、古い画面からの上書きを防ぎます
-- TO-BE は松竹梅の3案です（`kind` が `tobe_ume`＝梅：やり方の見直しだけ／`tobe_take`＝竹：手ごろなツールの導入／`tobe_matsu`＝松：RPA・システム連携で自動化）。1案だけだったころの `kind = tobe` の行は使いません（残っていても画面には出ません）
-- `businesses.adopted_plan` は「採用する案」です。業務一覧の削減時間に使います（未選択なら竹）
+- TO-BE は1つです。`kind = tobe_matsu` の行に入ります（松竹梅の3案だったころの「松」と同じ値。画面とAPIでは `tobe`）。`tobe_ume`・`tobe_take` と、さらに前の `tobe` の行は使いません（残っていても画面には出ません）
+- `businesses.adopted_plan`（採用する案）は、TO-BEを1つにしたので今は使っていません（列は残してあります）
 - `businesses.exec_view`（経営者の認識）と `field_view`（現場の実態）は、画面から入力欄と表示を外したので、今は使っていません（列とデータは残してあります）
-- 費用対効果（初期費用・月額費用・月の削減額・回収期間）は保存していません。案の `cost_items` と単価表、企業の時給、業務の月の件数から、表示のたびに計算します（`frontend/lib/cost.ts`）
+- 月の削減額は保存していません。削減時間・企業の時給・業務の月の件数から、表示のたびに計算します（`frontend/lib/cost.ts`）
+- 以前の単価表（`cost_items` テーブル）は使っていません。アプリはもう作りません（すでにあるDBには、テーブルが残っていても害はありません）
+- 削減工数（月あたり・時間）は、AS-ISの第1版とくらべた値です。自動の値＝（第1版の作業時間 − その版の作業時間）× 月の件数（`backend/app/effort.py`）。版ごとに手で入力した値（`flow_versions.saved_hours`）があれば、そちらを使います
 - 削減時間は保存していません。AS-IS と TO-BE の作業時間の合計の差を、表示のたびに計算します
 
 ## flows.data の中身（JSON）
@@ -99,9 +129,8 @@ erDiagram
 
 ```
 {
-  "summary": "…",                … TO-BEの案の要約（AS-ISでは使わない）
+  "summary": "…",                … TO-BEの要約（AS-ISでは使わない）
   "needs": ["RPAツール"],         … TO-BEの案で、導入・準備が必要なもの
-  "cost_items": ["RPA"],          … TO-BEの案で、お金のかかる導入物（単価表の名前。単価表にない名前は「要見積もり」）
   "removed_notes": {"S05": "…"},  … TO-BEの案で、なくした作業（排除）の理由（作業ID → 理由）
   "lanes": ["取引先", "営業部（受注）", "倉庫（出荷）"],     … 列（担当）の並び
   "steps": [

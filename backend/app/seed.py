@@ -100,7 +100,7 @@ def seed(db: Session) -> None:
         field_view="同じ注文を3回入力し、毎日残業で埋めている",
     )
     order.flows.append(FlowDoc(kind="asis", data={"lanes": ORDER_LANES, "steps": ORDER_ASIS}, updated_by="管理者（あなた）"))
-    order.flows.append(FlowDoc(kind="tobe_take", data={"lanes": ORDER_LANES, "steps": ORDER_TOBE,
+    order.flows.append(FlowDoc(kind="tobe_matsu", data={"lanes": ORDER_LANES, "steps": ORDER_TOBE,
                                                        "summary": "注文をWebフォームで受けて受注システムに集約し、手入力と作り直しをなくす",
                                                        "needs": ["Web受注フォーム", "受注システムと会計システムの連携"]}, updated_by="管理者（あなた）"))
 

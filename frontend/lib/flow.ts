@@ -218,7 +218,6 @@ export function normalize(flow: Flow): Flow {
   return {
     ...(flow.summary ? { summary: flow.summary } : {}),
     ...(flow.needs?.length ? { needs: flow.needs } : {}),
-    ...(flow.cost_items?.length ? { cost_items: flow.cost_items } : {}),
     ...(flow.removed_notes && Object.keys(flow.removed_notes).length ? { removed_notes: flow.removed_notes } : {}),
     lanes: flow.lanes ?? [],
     steps: (flow.steps ?? []).map((s) => ({ ...newStep(s.id, s.lane, false), ...s })),
