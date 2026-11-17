@@ -90,8 +90,11 @@ export default function BusinessPage() {
       // 前に開いていた別の業務のタブが残らないよう、どちらの場合も決める（保存後の読み直しでは変えない）
       if (openedBid.current !== bid) {
         openedBid.current = bid;
-        setTab(f.asis ? "asis" : "notes");
-        setViewing(null);
+        // ヒアリング履歴の「業務名（第2版）」から来たときは、アドレスの ?version=（版のID）で、その版を開く
+        const asked = Number(new URLSearchParams(window.location.search).get("version"));
+        const version = Number.isInteger(asked) && asked > 0 ? asked : null;
+        setTab(f.asis || version ? "asis" : "notes");
+        setViewing(version);
       }
       api.config().then((x) => setAiEnabled(!!x.ai_enabled), () => setAiEnabled(false));
     } catch (e) {

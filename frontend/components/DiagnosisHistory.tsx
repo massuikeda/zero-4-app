@@ -114,7 +114,7 @@ export function DiagnosisHistory({
               <ul className="diag-flows">
                 {d.versions.map((v) => (
                   <li key={v.business_id}>
-                    <Link className="link" href={`/businesses/${v.business_id}`} title="業務ページのAS-ISタブで、この版を見られます">
+                    <Link className="link" href={`/businesses/${v.business_id}?version=${v.version_id}`} title={`この記録のときのAS-IS（第${v.number}版）を開きます`}>
                       {v.business_name}
                       <span>第{v.number}版</span>
                     </Link>
