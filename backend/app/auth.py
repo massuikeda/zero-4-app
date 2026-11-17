@@ -96,7 +96,7 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
-# 登録されていないメールアドレスでも同じだけ計算して、応答の速さから「登録の有無」が分からないようにする
+# 登録されていないメールアドレスでも同じだけ計算して、応答の速さから「登録の有無」が分からないようにする。
 _DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
 
 
